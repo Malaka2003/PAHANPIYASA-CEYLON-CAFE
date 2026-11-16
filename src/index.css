@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Fraunces', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+
+    --canvas: #F6EFE0;
+    --surface: #FFFDF8;
+    --surface-muted: #ECE1CC;
+    --border-color: #DDD0B6;
+    --text-primary: #2A1C12;
+    --text-secondary: #543E2D;
+    --text-muted: #6E5745;
+    --accent: #2A5C3A;
+    --accent-hover: #1F462B;
+    --warm-accent: #9E4822;
+    --espresso: #2C1D13;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--canvas);
+    color: var(--text-primary);
+    overflow-x: clip;
+  }
+
+  .font-display {
+    font-family: var(--font-display-active, var(--font-display));
+  }
+
+  .font-mono-tabular {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ayubowan-blend-dark {
+    mix-blend-mode: screen;
+  }
+
+  .ayubowan-tint-dark {
+    filter: brightness(2.35) sepia(0.5) saturate(1.2) contrast(1.08);
+  }
+
+  .ayubowan-blend-light {
+    mix-blend-mode: multiply;
+  }
+
+  .ayubowan-tint-light {
+    filter: invert(1) contrast(1.25) saturate(1.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

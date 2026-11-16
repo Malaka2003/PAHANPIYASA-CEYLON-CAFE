@@ -1,0 +1,6 @@
+{
+  "name": "Ella Cloudscape Café",
+  "description": "Hillside café in Ella, Sri Lanka near the Nine Arch Bridge, serving freshly griddled roti, kottu, rice and curry, tropical juices, milkshakes, and baked sweets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
