@@ -5,15 +5,18 @@ import { ResilientImage } from './ResilientImage';
 interface CustomPhotoSectionsProps {
   sections: CustomPhotoSection[];
   customImages: CustomImagesMap;
-  onEditSections: () => void;
+  canEdit?: boolean;
+  onEditSections?: () => void;
 }
 
 export function CustomPhotoSections({
   sections,
   customImages,
+  canEdit = false,
   onEditSections,
 }: CustomPhotoSectionsProps) {
   const visibleSections = sections.filter((sec) => sec.visible);
+  const showAdminControls = Boolean(canEdit && onEditSections);
 
   return (
     <section
@@ -39,23 +42,25 @@ export function CustomPhotoSections({
             </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={onEditSections}
-            className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer self-start md:self-auto"
-            style={{
-              backgroundColor: 'var(--surface)',
-              borderColor: 'var(--border-color)',
-              color: 'var(--text-primary)',
-            }}
-          >
-            <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-            <span>Add Gallery Section / Photos</span>
-          </button>
+          {showAdminControls && (
+            <button
+              type="button"
+              onClick={onEditSections}
+              className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer self-start md:self-auto"
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: 'var(--border-color)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+              <span>Add Gallery Section / Photos</span>
+            </button>
+          )}
         </div>
 
         {visibleSections.length === 0 ? (
-          <EmptyPhotoSlot onEdit={onEditSections} />
+          <EmptyPhotoSlot onEdit={showAdminControls ? onEditSections : undefined} />
         ) : (
           <div className="space-y-16">
             {visibleSections.map((section, idx) => {
@@ -110,26 +115,28 @@ export function CustomPhotoSections({
                           )}
                         </div>
 
-                        <div className="mt-6">
-                          <button
-                            type="button"
-                            onClick={onEditSections}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-medium rounded-lg border transition-colors cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--surface)',
-                              borderColor: 'var(--border-color)',
-                              color: 'var(--text-primary)',
-                            }}
-                          >
-                            <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-                            <span>Add or Edit Pictures</span>
-                          </button>
-                        </div>
+                        {showAdminControls && (
+                          <div className="mt-6">
+                            <button
+                              type="button"
+                              onClick={onEditSections}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-medium rounded-lg border transition-colors cursor-pointer"
+                              style={{
+                                backgroundColor: 'var(--surface)',
+                                borderColor: 'var(--border-color)',
+                                color: 'var(--text-primary)',
+                              }}
+                            >
+                              <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                              <span>Add or Edit Pictures</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div className="lg:col-span-7">
                         {resolvedPhotos.length === 0 ? (
-                          <EmptyPhotoSlot onEdit={onEditSections} />
+                          <EmptyPhotoSlot onEdit={showAdminControls ? onEditSections : undefined} />
                         ) : resolvedPhotos.length === 1 ? (
                           <figure
                             className="border rounded-xl overflow-hidden h-full flex flex-col"
@@ -224,7 +231,7 @@ export function CustomPhotoSections({
                       </div>
 
                       {resolvedPhotos.length === 0 ? (
-                        <EmptyPhotoSlot onEdit={onEditSections} />
+                        <EmptyPhotoSlot onEdit={showAdminControls ? onEditSections : undefined} />
                       ) : effectiveLayout === 'single' ? (
                         <div className="space-y-6">
                           {resolvedPhotos.map((photo) => (
@@ -310,7 +317,7 @@ export function CustomPhotoSections({
   );
 }
 
-function EmptyPhotoSlot({ onEdit }: { onEdit: () => void }) {
+function EmptyPhotoSlot({ onEdit }: { onEdit?: () => void }) {
   return (
     <div
       className="border rounded-xl p-10 text-center"
@@ -322,18 +329,26 @@ function EmptyPhotoSlot({ onEdit }: { onEdit: () => void }) {
       <p className="font-display text-lg mb-2" style={{ color: 'var(--text-primary)' }}>
         No pictures added to this gallery section yet
       </p>
-      <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)' }}>
-        Upload one or more photos from your device or paste an image link.
-      </p>
-      <button
-        type="button"
-        onClick={onEdit}
-        className="inline-flex items-center gap-2 px-4 py-2 min-h-[40px] text-xs font-medium text-white rounded-lg cursor-pointer"
-        style={{ backgroundColor: 'var(--accent)' }}
-      >
-        <ImagePlus className="w-4 h-4" />
-        <span>Upload Pictures</span>
-      </button>
+      {onEdit ? (
+        <>
+          <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)' }}>
+            Upload one or more photos from your device or paste an image link.
+          </p>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center gap-2 px-4 py-2 min-h-[40px] text-xs font-medium text-white rounded-lg cursor-pointer"
+            style={{ backgroundColor: 'var(--accent)' }}
+          >
+            <ImagePlus className="w-4 h-4" />
+            <span>Upload Pictures</span>
+          </button>
+        </>
+      ) : (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Gallery photos are being curated for our guests.
+        </p>
+      )}
     </div>
   );
 }

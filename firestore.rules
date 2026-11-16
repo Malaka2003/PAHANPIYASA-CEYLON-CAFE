@@ -1,0 +1,218 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // -------------------------------------------------------------------------
+    // Global Safety Net (Default Deny)
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Hardened Global Helpers
+    // -------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Single Verified Owner Admin Gate (Zero Trust: requires verified owner email)
+    function isOwnerAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email == 'ellacloudscapecafe@gmail.com';
+    }
+
+    function hasValidAuditFields(data) {
+      return data.updatedBy is string &&
+        data.updatedBy == request.auth.uid &&
+        data.updatedBy.size() <= 128 &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidSiteSettings(data) {
+      return data.keys().hasAll([
+          'themeId', 'heroLayout', 'menuViewMode', 'fontStyle',
+          'cafeName', 'locationLabel', 'heroHeadline', 'openingHours',
+          'phoneDisplay', 'whatsappNumber', 'email', 'showSinhalaSubtitles',
+          'sectionOrder', 'hiddenSections', 'updatedBy', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'themeId', 'heroLayout', 'menuViewMode', 'fontStyle',
+          'cafeName', 'ayubowanGreeting', 'locationLabel', 'heroHeadline',
+          'heroAccentLine', 'heroSubtitle', 'openingHours', 'phoneDisplay',
+          'whatsappNumber', 'email', 'showSinhalaSubtitles',
+          'sectionOrder', 'hiddenSections', 'updatedBy', 'updatedAt'
+        ]) &&
+        data.themeId in ['village-ella', 'golden-ella', 'tea-estate', 'cinnamon-brass', 'highland-monsoon'] &&
+        data.heroLayout in ['panoramic', 'split'] &&
+        data.menuViewMode in ['gallery', 'cards', 'board'] &&
+        data.fontStyle in ['editorial', 'modern'] &&
+        data.cafeName is string && data.cafeName.size() >= 1 && data.cafeName.size() <= 120 &&
+        (!('ayubowanGreeting' in data) || (data.ayubowanGreeting is string && data.ayubowanGreeting.size() <= 200)) &&
+        data.locationLabel is string && data.locationLabel.size() >= 1 && data.locationLabel.size() <= 140 &&
+        data.heroHeadline is string && data.heroHeadline.size() >= 1 && data.heroHeadline.size() <= 140 &&
+        (!('heroAccentLine' in data) || (data.heroAccentLine is string && data.heroAccentLine.size() <= 140)) &&
+        (!('heroSubtitle' in data) || (data.heroSubtitle is string && data.heroSubtitle.size() <= 400)) &&
+        data.openingHours is string && data.openingHours.size() >= 1 && data.openingHours.size() <= 100 &&
+        data.phoneDisplay is string && data.phoneDisplay.size() >= 3 && data.phoneDisplay.size() <= 40 &&
+        data.whatsappNumber is string && data.whatsappNumber.size() >= 3 && data.whatsappNumber.size() <= 30 && data.whatsappNumber.matches('^[0-9]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.showSinhalaSubtitles is bool &&
+        data.sectionOrder is list && data.sectionOrder.size() >= 1 && data.sectionOrder.size() <= 5 && data.sectionOrder[0] is string &&
+        data.hiddenSections is list && data.hiddenSections.size() <= 5 &&
+        (data.hiddenSections.size() == 0 || data.hiddenSections[0] is string) &&
+        hasValidAuditFields(data);
+    }
+
+    function isValidMenuItem(data, itemId) {
+      return data.keys().hasAll([
+          'id', 'name', 'category', 'categoryLabel', 'note',
+          'vegetarian', 'styleTag', 'available', 'sortOrder',
+          'updatedBy', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'name', 'sinhalaName', 'category', 'categoryLabel', 'note',
+          'vegetarian', 'styleTag', 'priceLkr', 'available', 'sortOrder',
+          'updatedBy', 'updatedAt'
+        ]) &&
+        data.id is string && data.id == itemId && isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        (!('sinhalaName' in data) || (data.sinhalaName is string && data.sinhalaName.size() <= 120)) &&
+        data.category in ['roti', 'juice', 'milkshake', 'rice', 'rice&curry', 'kottu', 'sweets', 'buns'] &&
+        data.categoryLabel is string && data.categoryLabel.size() >= 1 && data.categoryLabel.size() <= 60 &&
+        data.note is string && data.note.size() <= 400 &&
+        data.vegetarian is bool &&
+        data.styleTag is string && data.styleTag.size() <= 60 &&
+        (!('priceLkr' in data) || (data.priceLkr is string && data.priceLkr.size() <= 30)) &&
+        data.available is bool &&
+        data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 10000 &&
+        hasValidAuditFields(data);
+    }
+
+    function isValidPhotoSection(data, sectionId) {
+      return data.keys().hasAll([
+          'id', 'title', 'description', 'layout', 'visible',
+          'sortOrder', 'photos', 'updatedBy', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'kicker', 'title', 'description', 'layout', 'visible',
+          'sortOrder', 'photos', 'updatedBy', 'updatedAt'
+        ]) &&
+        data.id is string && data.id == sectionId && isValidId(data.id) &&
+        (!('kicker' in data) || (data.kicker is string && data.kicker.size() <= 120)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.description is string && data.description.size() <= 500 &&
+        data.layout in ['auto', 'single', 'two-up', 'grid', 'split'] &&
+        data.visible is bool &&
+        data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 1000 &&
+        data.photos is list && data.photos.size() <= 20 &&
+        (data.photos.size() == 0 || data.photos[0] is map) &&
+        hasValidAuditFields(data);
+    }
+
+    function isValidSiteMedia(data) {
+      return data.keys().hasAll(['slotKey', 'imageUrl', 'updatedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['slotKey', 'imageUrl', 'updatedBy', 'updatedAt']) &&
+        data.slotKey is string && data.slotKey.size() >= 1 && data.slotKey.size() <= 128 &&
+        data.imageUrl is string && data.imageUrl.size() >= 1 && data.imageUrl.size() <= 450000 &&
+        hasValidAuditFields(data);
+    }
+
+    function isValidAdminProfile(data, adminId) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'lastLoginAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'lastLoginAt']) &&
+        data.uid is string && data.uid == request.auth.uid && data.uid == adminId &&
+        data.email is string && data.email == 'ellacloudscapecafe@gmail.com' &&
+        data.role == 'owner' &&
+        data.lastLoginAt is timestamp && data.lastLoginAt == request.time;
+    }
+
+    // Startup connection check document
+    match /test/{testId} {
+      allow get: if isValidId(testId) && testId == 'connection';
+    }
+
+    // -------------------------------------------------------------------------
+    // Public Read-Only Storefront Collections (Admin-Only Writes)
+    // -------------------------------------------------------------------------
+    match /siteSettings/{settingId} {
+      allow get: if isValidId(settingId) && settingId == 'main';
+      allow list: if false;
+      allow create: if isValidId(settingId) && settingId == 'main' && isValidSiteSettings(incoming()) && isOwnerAdmin();
+      allow update: if isValidId(settingId) && settingId == 'main' && isValidSiteSettings(incoming()) && isOwnerAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'themeId', 'heroLayout', 'menuViewMode', 'fontStyle',
+          'cafeName', 'ayubowanGreeting', 'locationLabel', 'heroHeadline',
+          'heroAccentLine', 'heroSubtitle', 'openingHours', 'phoneDisplay',
+          'whatsappNumber', 'email', 'showSinhalaSubtitles',
+          'sectionOrder', 'hiddenSections', 'updatedBy', 'updatedAt'
+        ]);
+      allow delete: if isValidId(settingId) && settingId == 'main' && isOwnerAdmin();
+    }
+
+    match /menuItems/{itemId} {
+      allow get: if isValidId(itemId);
+      allow list: if isOwnerAdmin() || (request.query.limit is int && request.query.limit >= 1 && request.query.limit <= 200);
+      allow create: if isValidId(itemId) && isValidMenuItem(incoming(), itemId) && isOwnerAdmin();
+      allow update: if isValidId(itemId) && isValidMenuItem(incoming(), itemId) && isOwnerAdmin() &&
+        incoming().id == existing().id &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'sinhalaName', 'category', 'categoryLabel', 'note',
+          'vegetarian', 'styleTag', 'priceLkr', 'available', 'sortOrder',
+          'updatedBy', 'updatedAt'
+        ]);
+      allow delete: if isValidId(itemId) && isOwnerAdmin();
+    }
+
+    match /photoSections/{sectionId} {
+      allow get: if isValidId(sectionId);
+      allow list: if isOwnerAdmin() || (request.query.limit is int && request.query.limit >= 1 && request.query.limit <= 100);
+      allow create: if isValidId(sectionId) && isValidPhotoSection(incoming(), sectionId) && isOwnerAdmin();
+      allow update: if isValidId(sectionId) && isValidPhotoSection(incoming(), sectionId) && isOwnerAdmin() &&
+        incoming().id == existing().id &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'kicker', 'title', 'description', 'layout', 'visible',
+          'sortOrder', 'photos', 'updatedBy', 'updatedAt'
+        ]);
+      allow delete: if isValidId(sectionId) && isOwnerAdmin();
+    }
+
+    match /siteMedia/{mediaId} {
+      allow get: if isValidId(mediaId);
+      allow list: if isOwnerAdmin() || (request.query.limit is int && request.query.limit >= 1 && request.query.limit <= 200);
+      allow create: if isValidId(mediaId) && isValidSiteMedia(incoming()) && isOwnerAdmin();
+      allow update: if isValidId(mediaId) && isValidSiteMedia(incoming()) && isOwnerAdmin() &&
+        incoming().slotKey == existing().slotKey &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['imageUrl', 'updatedBy', 'updatedAt']);
+      allow delete: if isValidId(mediaId) && isOwnerAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Private Owner Admin Collection
+    // -------------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isOwnerAdmin() && adminId == request.auth.uid;
+      allow list: if false;
+      allow create: if isValidId(adminId) && isOwnerAdmin() && isValidAdminProfile(incoming(), adminId);
+      allow update: if isValidId(adminId) && isOwnerAdmin() && isValidAdminProfile(incoming(), adminId) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().role == existing().role &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastLoginAt']);
+      allow delete: if false;
+    }
+  }
+}

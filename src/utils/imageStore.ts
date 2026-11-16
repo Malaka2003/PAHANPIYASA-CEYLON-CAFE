@@ -1,88 +1,12 @@
-const DB_NAME = 'ella_cloudscape_media_db';
-const STORE_NAME = 'custom_images';
-const DB_VERSION = 1;
-
-function openMediaDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB is unavailable in this browser.'));
-      return;
-    }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('Failed to open media database.'));
-  });
-}
-
-export async function loadAllCustomImages(): Promise<Record<string, string>> {
-  try {
-    const db = await openMediaDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const result: Record<string, string> = {};
-      const cursorReq = store.openCursor();
-      cursorReq.onsuccess = () => {
-        const cursor = cursorReq.result;
-        if (cursor) {
-          if (typeof cursor.key === 'string' && typeof cursor.value === 'string') {
-            result[cursor.key] = cursor.value;
-          }
-          cursor.continue();
-        } else {
-          resolve(result);
-        }
-      };
-      cursorReq.onerror = () => reject(cursorReq.error);
-    });
-  } catch {
-    return {};
-  }
-}
-
-export async function saveCustomImage(slotKey: string, value: string): Promise<void> {
-  const db = await openMediaDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put(value, slotKey);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('Failed to save custom image.'));
-  });
-}
-
-export async function deleteCustomImage(slotKey: string): Promise<void> {
-  const db = await openMediaDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).delete(slotKey);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('Failed to delete custom image.'));
-  });
-}
-
-export async function clearAllCustomImages(): Promise<void> {
-  try {
-    const db = await openMediaDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    // Ignore cleanup errors
-  }
+export function slotKeyToDocId(slotKey: string): string {
+  const normalized = slotKey.replace(/[^a-zA-Z0-9_-]/g, '__').slice(0, 128);
+  return normalized || 'media_slot';
 }
 
 export async function processImageFile(
   file: File,
-  maxDimension = 1280
+  maxDimension = 1280,
+  maxCharLength = 380000
 ): Promise<string> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Please select a valid image file (JPG, PNG, or WebP).');
@@ -101,33 +25,50 @@ export async function processImageFile(
     reader.readAsDataURL(file);
   });
 
-  // Load into an HTMLImageElement so we can scale down large camera photos cleanly
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const element = new Image();
     element.onload = () => resolve(element);
-    element.onerror = () => reject(new Error('Selected file could not be decoded as an image.'));
+    element.onerror = () =>
+      reject(new Error('Selected file could not be decoded as an image.'));
     element.src = rawDataUrl;
   });
 
   const { naturalWidth, naturalHeight } = img;
   if (!naturalWidth || !naturalHeight) {
+    if (rawDataUrl.length > maxCharLength) {
+      throw new Error('Image is too large to upload. Please select a smaller photo.');
+    }
     return rawDataUrl;
   }
 
   const longestSide = Math.max(naturalWidth, naturalHeight);
-  const scale = longestSide > maxDimension ? maxDimension / longestSide : 1;
-  const targetWidth = Math.round(naturalWidth * scale);
-  const targetHeight = Math.round(naturalHeight * scale);
+  let currentScale = longestSide > maxDimension ? maxDimension / longestSide : 1;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return rawDataUrl;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const targetWidth = Math.max(120, Math.round(naturalWidth * currentScale));
+    const targetHeight = Math.max(120, Math.round(naturalHeight * currentScale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return rawDataUrl;
+    }
+
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+    const qualities = [0.82, 0.72, 0.62, 0.5];
+    for (const quality of qualities) {
+      const candidate = canvas.toDataURL('image/jpeg', quality);
+      if (candidate.length <= maxCharLength) {
+        return candidate;
+      }
+    }
+
+    currentScale *= 0.75;
   }
 
-  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-  const outputMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
-  return canvas.toDataURL(outputMime, 0.85);
+  throw new Error(
+    'This photo is too detailed to save cleanly. Try cropping or selecting a smaller image.'
+  );
 }

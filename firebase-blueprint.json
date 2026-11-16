@@ -1,0 +1,344 @@
+{
+  "entities": {
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Global café storefront configuration, theme selection, contact info, and section ordering.",
+      "type": "object",
+      "properties": {
+        "themeId": {
+          "type": "string",
+          "enum": [
+            "village-ella",
+            "golden-ella",
+            "tea-estate",
+            "cinnamon-brass",
+            "highland-monsoon"
+          ],
+          "maxLength": 40
+        },
+        "heroLayout": {
+          "type": "string",
+          "enum": ["panoramic", "split"],
+          "maxLength": 20
+        },
+        "menuViewMode": {
+          "type": "string",
+          "enum": ["gallery", "cards", "board"],
+          "maxLength": 20
+        },
+        "fontStyle": {
+          "type": "string",
+          "enum": ["editorial", "modern"],
+          "maxLength": 20
+        },
+        "cafeName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "ayubowanGreeting": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "locationLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "heroHeadline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "heroAccentLine": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "heroSubtitle": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "openingHours": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "phoneDisplay": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 40
+        },
+        "whatsappNumber": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 30,
+          "pattern": "^[0-9]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120
+        },
+        "showSinhalaSubtitles": {
+          "type": "boolean"
+        },
+        "sectionOrder": {
+          "type": "array",
+          "description": "Ordered list of configurable core sections (max 5)."
+        },
+        "hiddenSections": {
+          "type": "array",
+          "description": "Hidden core section identifiers (max 5)."
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "themeId",
+        "heroLayout",
+        "menuViewMode",
+        "fontStyle",
+        "cafeName",
+        "locationLabel",
+        "heroHeadline",
+        "openingHours",
+        "phoneDisplay",
+        "whatsappNumber",
+        "email",
+        "showSinhalaSubtitles",
+        "sectionOrder",
+        "hiddenSections",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "MenuItemDoc": {
+      "title": "MenuItemDoc",
+      "description": "Individual dish or drink displayed in the Traditional Menu.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "sinhalaName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "roti",
+            "juice",
+            "milkshake",
+            "rice",
+            "rice&curry",
+            "kottu",
+            "sweets",
+            "buns"
+          ],
+          "maxLength": 30
+        },
+        "categoryLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "vegetarian": {
+          "type": "boolean"
+        },
+        "styleTag": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "priceLkr": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "sortOrder": {
+          "type": "number"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "category",
+        "categoryLabel",
+        "note",
+        "vegetarian",
+        "styleTag",
+        "available",
+        "sortOrder",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "PhotoSectionDoc": {
+      "title": "PhotoSectionDoc",
+      "description": "Customizable gallery section containing 1 or more photos and captions.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "kicker": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "layout": {
+          "type": "string",
+          "enum": ["auto", "single", "two-up", "grid", "split"],
+          "maxLength": 20
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "sortOrder": {
+          "type": "number"
+        },
+        "photos": {
+          "type": "array",
+          "description": "Bounded list of up to 20 photo metadata entries."
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "layout",
+        "visible",
+        "sortOrder",
+        "photos",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "SiteMediaDoc": {
+      "title": "SiteMediaDoc",
+      "description": "Uploaded photo asset or external URL mapped to a specific site media slot.",
+      "type": "object",
+      "properties": {
+        "slotKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "imageUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 450000
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["slotKey", "imageUrl", "updatedBy", "updatedAt"]
+    },
+    "AdminAuditDoc": {
+      "title": "AdminAuditDoc",
+      "description": "Private admin access profile record restricted strictly to the verified site owner.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["owner"],
+          "maxLength": 20
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "role", "lastLoginAt"]
+    }
+  },
+  "firestore": {
+    "/siteSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Publicly readable storefront configuration; writable exclusively by the verified owner admin."
+    },
+    "/menuItems/{itemId}": {
+      "schema": { "$ref": "#/entities/MenuItemDoc" },
+      "description": "Publicly readable traditional menu dishes and prices; writable exclusively by the verified owner admin."
+    },
+    "/photoSections/{sectionId}": {
+      "schema": { "$ref": "#/entities/PhotoSectionDoc" },
+      "description": "Publicly readable gallery sections; writable exclusively by the verified owner admin."
+    },
+    "/siteMedia/{mediaId}": {
+      "schema": { "$ref": "#/entities/SiteMediaDoc" },
+      "description": "Publicly readable compressed image slots; writable exclusively by the verified owner admin."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminAuditDoc" },
+      "description": "Private owner admin profile document readable and writable exclusively by the verified owner."
+    }
+  }
+}

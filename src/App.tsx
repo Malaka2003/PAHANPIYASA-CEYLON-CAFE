@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   ArrowDown,
-  ImagePlus,
   MapPin,
-  Plus,
+  ShieldCheck,
   SlidersHorizontal,
   UtensilsCrossed,
 } from 'lucide-react';
@@ -19,9 +19,15 @@ import {
   MenuItem,
   SRI_LANKA_THEMES,
 } from './data/cafeData';
+import { auth, isVerifiedOwnerAdmin } from './firebase';
+import {
+  recordAdminLogin,
+  subscribeStorefrontData,
+} from './services/siteFirestore';
 import {
   CustomImagesMap,
   CustomPhotoSection,
+  MenuViewMode,
   SectionId,
   SiteConfig,
 } from './types/siteConfig';
@@ -33,17 +39,11 @@ import { SriLankanExperienceSection } from './components/SriLankanExperienceSect
 import { VisitUsSection } from './components/VisitUsSection';
 import { ContactSection } from './components/ContactSection';
 import { OrderTrayDrawer } from './components/OrderTrayDrawer';
-import { CustomizerDrawer, CustomizerTab } from './components/CustomizerDrawer';
+import { AdminLoginModal } from './components/AdminLoginModal';
+import { AdminDashboard, AdminTab } from './components/AdminDashboard';
 import { ResilientImage } from './components/ResilientImage';
-import {
-  clearAllCustomImages,
-  deleteCustomImage,
-  loadAllCustomImages,
-  saveCustomImage,
-} from './utils/imageStore';
 
 const TRAY_STORAGE_KEY = 'ella_cloudscape_tray_v1';
-const CONFIG_STORAGE_KEY = 'ella_cloudscape_site_config_v3';
 
 const DEFAULT_PHOTO_SECTIONS: CustomPhotoSection[] = [
   {
@@ -109,49 +109,17 @@ const DEFAULT_CONFIG: SiteConfig = {
 };
 
 export default function App() {
-  const [config, setConfig] = useState<SiteConfig>(() => {
-    try {
-      const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          const validOrder = Array.isArray(parsed.sectionOrder)
-            ? parsed.sectionOrder.filter((id: SectionId) =>
-                DEFAULT_SECTION_ORDER.includes(id)
-              )
-            : [];
-          const mergedOrder =
-            validOrder.length === DEFAULT_SECTION_ORDER.length
-              ? validOrder
-              : DEFAULT_SECTION_ORDER;
-
-          return {
-            ...DEFAULT_CONFIG,
-            ...parsed,
-            cafeName:
-              !parsed.cafeName || parsed.cafeName === 'Ella Cloudscape Café'
-                ? CAFE_INFO.name
-                : parsed.cafeName,
-            customMenuItems: Array.isArray(parsed.customMenuItems)
-              ? parsed.customMenuItems
-              : DEFAULT_CONFIG.customMenuItems,
-            sectionOrder: mergedOrder,
-            hiddenSections: Array.isArray(parsed.hiddenSections)
-              ? parsed.hiddenSections
-              : DEFAULT_CONFIG.hiddenSections,
-            customPhotoSections: Array.isArray(parsed.customPhotoSections)
-              ? parsed.customPhotoSections
-              : DEFAULT_CONFIG.customPhotoSections,
-          };
-        }
-      }
-    } catch {
-      // Ignore storage read errors
-    }
-    return DEFAULT_CONFIG;
-  });
-
+  const [cloudSettings, setCloudSettings] = useState<Partial<SiteConfig> | null>(null);
+  const [cloudMenuItems, setCloudMenuItems] = useState<MenuItem[] | null>(null);
+  const [cloudPhotoSections, setCloudPhotoSections] = useState<CustomPhotoSection[] | null>(null);
   const [customImages, setCustomImages] = useState<CustomImagesMap>({});
+
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  const [visitorMenuViewOverride, setVisitorMenuViewOverride] =
+    useState<MenuViewMode | null>(null);
+
   const [externalCategorySelection, setExternalCategorySelection] = useState<{
     category: MenuCategoryId;
     seq: number;
@@ -173,16 +141,99 @@ export default function App() {
   });
 
   const [isTrayOpen, setIsTrayOpen] = useState(false);
-  const [isCustomizerOpen, setIsCustomizerOpen] = useState(false);
-  const [customizerTab, setCustomizerTab] = useState<CustomizerTab>('sections');
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+  const [dashboardTab, setDashboardTab] = useState<AdminTab>('photos');
+  const ownerTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
 
+  const isOwnerAdmin = isVerifiedOwnerAdmin(currentUser);
+
+  // Compose authoritative storefront configuration (Firestore values override defaults)
+  const validCloudOrder = Array.isArray(cloudSettings?.sectionOrder)
+    ? cloudSettings.sectionOrder.filter((id): id is SectionId =>
+        DEFAULT_SECTION_ORDER.includes(id)
+      )
+    : [];
+
+  const config: SiteConfig = {
+    ...DEFAULT_CONFIG,
+    ...(cloudSettings ?? {}),
+    sectionOrder:
+      validCloudOrder.length === DEFAULT_SECTION_ORDER.length
+        ? validCloudOrder
+        : DEFAULT_SECTION_ORDER,
+    hiddenSections: Array.isArray(cloudSettings?.hiddenSections)
+      ? cloudSettings.hiddenSections
+      : DEFAULT_CONFIG.hiddenSections,
+    customMenuItems: cloudMenuItems ?? DEFAULT_CONFIG.customMenuItems,
+    customPhotoSections: cloudPhotoSections ?? DEFAULT_CONFIG.customPhotoSections,
+  };
+
+  // Subscribe to Firebase Auth state
   useEffect(() => {
-    loadAllCustomImages().then((loaded) => {
-      if (Object.keys(loaded).length > 0) {
-        setCustomImages(loaded);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthReady(true);
+      if (isVerifiedOwnerAdmin(user)) {
+        void recordAdminLogin(user).catch((err) => {
+          console.error('Failed to record admin login:', err);
+        });
+      } else {
+        setIsDashboardOpen(false);
       }
     });
+    return () => unsubscribe();
   }, []);
+
+  // Subscribe to live read-only storefront collections from Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeStorefrontData({
+      onSettings: (settings) => setCloudSettings(settings),
+      onMenuItems: (items) => setCloudMenuItems(items),
+      onPhotoSections: (sections) => setCloudPhotoSections(sections),
+      onMediaMap: (media) => setCustomImages(media),
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Open owner login / dashboard when visiting /#admin or ?admin=1
+  useEffect(() => {
+    if (!authReady) return;
+
+    const checkAdminRoute = () => {
+      const wantsAdmin =
+        window.location.hash === '#admin' ||
+        new URLSearchParams(window.location.search).get('admin') === '1';
+      if (!wantsAdmin) return;
+
+      if (isVerifiedOwnerAdmin(currentUser)) {
+        setIsLoginModalOpen(false);
+        setIsDashboardOpen(true);
+      } else {
+        setIsLoginModalOpen(true);
+      }
+    };
+
+    checkAdminRoute();
+    window.addEventListener('hashchange', checkAdminRoute);
+    return () => window.removeEventListener('hashchange', checkAdminRoute);
+  }, [authReady, currentUser]);
+
+  // Keyboard shortcut (Ctrl/Cmd + Shift + A) to open private Owner Login / Admin Dashboard
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        if (isVerifiedOwnerAdmin(currentUser)) {
+          setIsDashboardOpen(true);
+        } else {
+          setIsLoginModalOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [currentUser]);
 
   // Sync theme palette & typography tokens to :root
   useEffect(() => {
@@ -207,33 +258,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
-    } catch {
-      // Ignore storage write errors
-    }
-  }, [config]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem(TRAY_STORAGE_KEY, JSON.stringify(trayQuantities));
     } catch {
       // Ignore storage write errors
     }
   }, [trayQuantities]);
-
-  const handleSaveCustomImage = async (slotKey: string, value: string) => {
-    await saveCustomImage(slotKey, value);
-    setCustomImages((prev) => ({ ...prev, [slotKey]: value }));
-  };
-
-  const handleResetCustomImage = async (slotKey: string) => {
-    await deleteCustomImage(slotKey);
-    setCustomImages((prev) => {
-      const next = { ...prev };
-      delete next[slotKey];
-      return next;
-    });
-  };
 
   const handleAddItem = (item: MenuItem) => {
     setTrayQuantities((prev) => ({
@@ -261,15 +290,30 @@ export default function App() {
     setTrayQuantities({});
   };
 
-  const handleResetConfig = async () => {
-    setConfig(DEFAULT_CONFIG);
-    setCustomImages({});
-    await clearAllCustomImages();
+  const openAdminAccess = (tab: AdminTab = 'photos') => {
+    if (isVerifiedOwnerAdmin(currentUser)) {
+      setDashboardTab(tab);
+      setIsDashboardOpen(true);
+    } else {
+      setDashboardTab(tab);
+      setIsLoginModalOpen(true);
+    }
   };
 
-  const openCustomizer = (tab: CustomizerTab) => {
-    setCustomizerTab(tab);
-    setIsCustomizerOpen(true);
+  const handleDiscreetOwnerTap = () => {
+    const now = Date.now();
+    if (now - ownerTapRef.current.lastAt > 2500) {
+      ownerTapRef.current = { count: 1, lastAt: now };
+    } else {
+      ownerTapRef.current = {
+        count: ownerTapRef.current.count + 1,
+        lastAt: now,
+      };
+    }
+    if (ownerTapRef.current.count >= 5) {
+      ownerTapRef.current = { count: 0, lastAt: 0 };
+      openAdminAccess('overview');
+    }
   };
 
   const handleQuickJumpCategory = (category: MenuCategoryId) => {
@@ -287,6 +331,7 @@ export default function App() {
     (id) => !config.hiddenSections.includes(id)
   );
   const heroImageSrc = customImages.hero || CAFE_INFO.heroImage;
+  const activeMenuViewMode = visitorMenuViewOverride ?? config.menuViewMode;
 
   const renderSection = (sectionId: SectionId) => {
     if (sectionId === 'menu') {
@@ -295,12 +340,10 @@ export default function App() {
           key="menu"
           items={config.customMenuItems}
           customImages={customImages}
-          viewMode={config.menuViewMode}
+          viewMode={activeMenuViewMode}
           showSinhalaSubtitles={config.showSinhalaSubtitles}
           externalCategorySelection={externalCategorySelection}
-          onChangeViewMode={(mode) =>
-            setConfig((prev) => ({ ...prev, menuViewMode: mode }))
-          }
+          onChangeViewMode={(mode) => setVisitorMenuViewOverride(mode)}
           trayQuantities={trayQuantities}
           onAddItem={handleAddItem}
           onDecrementItem={handleDecrementItem}
@@ -314,7 +357,10 @@ export default function App() {
           key="gallery"
           sections={config.customPhotoSections}
           customImages={customImages}
-          onEditSections={() => openCustomizer('sections')}
+          canEdit={isOwnerAdmin}
+          onEditSections={
+            isOwnerAdmin ? () => openAdminAccess('photos') : undefined
+          }
         />
       );
     }
@@ -575,17 +621,17 @@ export default function App() {
           onQuickJumpCategory={handleQuickJumpCategory}
         />
 
-        {/* Quiet Owner Studio & Café Info Bar */}
+        {/* Read-Only Café Info Strip for Visitors */}
         <div className="max-w-[1240px] mx-auto px-5 sm:px-8 pb-12">
           <div
-            className="border rounded-xl flex flex-col lg:flex-row lg:items-center justify-between"
+            className="border rounded-xl overflow-hidden"
             style={{
               backgroundColor: 'var(--surface)',
               borderColor: 'var(--border-color)',
             }}
           >
             <dl
-              className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x"
               style={{ borderColor: 'var(--border-color)' }}
             >
               <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
@@ -627,48 +673,6 @@ export default function App() {
                 </dd>
               </div>
             </dl>
-
-            <div
-              className="px-5 py-3 border-t lg:border-t-0 lg:border-l flex flex-wrap items-center justify-end gap-2 shrink-0"
-              style={{ borderColor: 'var(--border-color)' }}
-            >
-              <button
-                type="button"
-                onClick={() => openCustomizer('sections')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--surface-muted)',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                <Plus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-                <span>Photo Section</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => openCustomizer('images')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--surface-muted)',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-                <span>Your Photos</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => openCustomizer('vibe')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--surface-muted)',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-                <span>Customize</span>
-              </button>
-            </div>
           </div>
         </div>
 
@@ -689,7 +693,10 @@ export default function App() {
             <p className="font-display text-lg font-medium text-[#FAF4E8] mt-1">
               {config.cafeName}
             </p>
-            <p className="text-xs text-[#D8CCB8] mt-1">
+            <p
+              onClick={handleDiscreetOwnerTap}
+              className="text-xs text-[#D8CCB8] mt-1 select-none"
+            >
               © 2026 {config.cafeName} · {config.locationLabel}
             </p>
           </div>
@@ -737,16 +744,34 @@ export default function App() {
             >
               WhatsApp {config.phoneDisplay}
             </a>
-            <button
-              type="button"
-              onClick={() => openCustomizer('sections')}
-              className="text-[#F2B449] hover:underline whitespace-nowrap cursor-pointer"
-            >
-              Customize Page &amp; Photos
-            </button>
+            {isOwnerAdmin && (
+              <button
+                type="button"
+                onClick={() => openAdminAccess('overview')}
+                className="inline-flex items-center gap-1.5 text-[#F2B449] hover:underline whitespace-nowrap cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin Dashboard</span>
+              </button>
+            )}
           </div>
         </div>
       </footer>
+
+      {/* Floating Admin Return Bar — Strictly rendered ONLY for the verified owner */}
+      {isOwnerAdmin && !isDashboardOpen && (
+        <div className="fixed bottom-4 right-4 z-40">
+          <button
+            type="button"
+            onClick={() => openAdminAccess('photos')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 min-h-[44px] text-xs font-semibold text-white rounded-full shadow-lg cursor-pointer transition-transform hover:scale-[1.02]"
+            style={{ backgroundColor: 'var(--accent)' }}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>Admin Dashboard</span>
+          </button>
+        </div>
+      )}
 
       <OrderTrayDrawer
         isOpen={isTrayOpen}
@@ -760,18 +785,31 @@ export default function App() {
         onClearTray={handleClearTray}
       />
 
-      <CustomizerDrawer
-        key={customizerTab}
-        isOpen={isCustomizerOpen}
-        onClose={() => setIsCustomizerOpen(false)}
-        config={config}
-        customImages={customImages}
-        initialTab={customizerTab}
-        onUpdateConfig={(updater) => setConfig(updater)}
-        onSaveCustomImage={handleSaveCustomImage}
-        onResetCustomImage={handleResetCustomImage}
-        onResetConfig={handleResetConfig}
+      <AdminLoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        currentUser={currentUser}
+        cafeName={config.cafeName}
+        onAuthenticated={() => {
+          setIsLoginModalOpen(false);
+          setIsDashboardOpen(true);
+        }}
       />
+
+      {isOwnerAdmin && isDashboardOpen && (
+        <AdminDashboard
+          isOpen={isDashboardOpen}
+          onClose={() => setIsDashboardOpen(false)}
+          currentUser={currentUser}
+          config={config}
+          defaultConfig={DEFAULT_CONFIG}
+          customImages={customImages}
+          hasCloudSettings={cloudSettings !== null}
+          hasCloudMenu={cloudMenuItems !== null}
+          hasCloudSections={cloudPhotoSections !== null}
+          initialTab={dashboardTab}
+        />
+      )}
     </div>
   );
 }
