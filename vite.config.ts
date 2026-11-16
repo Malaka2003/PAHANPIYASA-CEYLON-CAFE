@@ -18,6 +18,7 @@ export default defineConfig(() => {
         closeBundle(error?: Error): void {
           if (error) {
             return;
+            base: '/PAHANPIYASA-CEYLON-CAFE/',
           }
           const distDir = path.resolve(__dirname, 'dist');
           const srcAssets = path.resolve(__dirname, 'src/assets');
