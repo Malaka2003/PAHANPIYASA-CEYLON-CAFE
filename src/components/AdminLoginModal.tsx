@@ -25,6 +25,7 @@ export function AdminLoginModal({
 }: AdminLoginModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [unauthorizedHost, setUnauthorizedHost] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -33,6 +34,7 @@ export function AdminLoginModal({
 
   const handleGoogleLogin = async () => {
     setErrorMessage(null);
+    setUnauthorizedHost(null);
     setIsSubmitting(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
@@ -54,6 +56,13 @@ export function AdminLoginModal({
       } else if (code === 'auth/popup-blocked') {
         setErrorMessage(
           'Your browser blocked the Google sign-in popup. Please allow popups for this site and try again.'
+        );
+      } else if (code === 'auth/unauthorized-domain') {
+        const host =
+          typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+        setUnauthorizedHost(host);
+        setErrorMessage(
+          `Domain "${host}" is not yet in your Firebase Authorized Domains list.`
         );
       } else {
         setErrorMessage(
@@ -243,12 +252,27 @@ export function AdminLoginModal({
               </div>
 
               {errorMessage && (
-                <p
+                <div
                   role="alert"
-                  className="text-xs font-medium text-[#9B2C2C] bg-[#FEF2F2] border border-[#FECACA] rounded-xl px-3.5 py-2.5"
+                  className="text-xs font-medium text-[#9B2C2C] bg-[#FEF2F2] border border-[#FECACA] rounded-xl px-3.5 py-2.5 space-y-1.5 break-words"
                 >
-                  {errorMessage}
-                </p>
+                  <p>{errorMessage}</p>
+                  {unauthorizedHost && (
+                    <p className="font-normal leading-relaxed">
+                      Add <strong className="font-mono-tabular">{unauthorizedHost}</strong>{' '}
+                      under{' '}
+                      <a
+                        href="https://console.firebase.google.com/project/lively-hall-484615-k4/authentication/settings"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline font-semibold"
+                      >
+                        Firebase Console → Authentication → Settings → Authorized domains
+                      </a>
+                      , then try again.
+                    </p>
+                  )}
+                </div>
               )}
 
               <button
