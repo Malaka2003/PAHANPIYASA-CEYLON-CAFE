@@ -37,7 +37,7 @@ import {
   SectionId,
   SiteConfig,
 } from './types/siteConfig';
-import { Navbar } from './components/Navbar';
+import { Navbar, PageTabId } from './components/Navbar';
 import { StoryMenuBand } from './components/StoryMenuBand';
 import { MenuSection } from './components/MenuSection';
 import { CustomPhotoSections } from './components/CustomPhotoSections';
@@ -48,6 +48,35 @@ import { OrderTrayDrawer } from './components/OrderTrayDrawer';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminDashboard, AdminTab } from './components/AdminDashboard';
 import { ResilientImage } from './components/ResilientImage';
+
+function resolveTabFromHash(hash: string): PageTabId | null {
+  switch (hash.toLowerCase()) {
+    case '#home':
+      return 'home';
+    case '#our-story':
+    case '#sri-lankan-experience':
+      return 'our-story';
+    case '#traditional-menu':
+    case '#menu':
+      return 'menu';
+    case '#gallery':
+      return 'gallery';
+    case '#reservations':
+    case '#contact':
+    case '#visit-us':
+      return 'reservations';
+    default:
+      return null;
+  }
+}
+
+const TAB_TO_HASH: Record<PageTabId, string> = {
+  home: '#home',
+  'our-story': '#our-story',
+  menu: '#traditional-menu',
+  gallery: '#gallery',
+  reservations: '#reservations',
+};
 
 const TRAY_STORAGE_KEY = 'ella_cloudscape_tray_v1';
 const COLOR_MODE_STORAGE_KEY = 'pahanpiyasa_color_mode_v1';
@@ -174,6 +203,12 @@ export default function App() {
     }
     return 'light';
   });
+  const [activeTab, setActiveTab] = useState<PageTabId>(() => {
+    if (typeof window !== 'undefined') {
+      return resolveTabFromHash(window.location.hash) ?? 'home';
+    }
+    return 'home';
+  });
 
   const isOwnerAdmin = isVerifiedOwnerAdmin(currentUser) && otpVerified;
 
@@ -249,7 +284,19 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Open owner login / dashboard when visiting /#admin or ?admin=1
+  // Open owner login / dashboard when visiting /#admin or ?admin=1, and sync section hashes to tabs
+  useEffect(() => {
+    const syncFromHash = () => {
+      const matchedTab = resolveTabFromHash(window.location.hash);
+      if (matchedTab) {
+        setActiveTab(matchedTab);
+      }
+    };
+    syncFromHash();
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
+  }, []);
+
   useEffect(() => {
     if (!authReady) return;
 
@@ -380,11 +427,26 @@ export default function App() {
     }
   };
 
+  const handleSelectTab = (tab: PageTabId, preserveMenuFilter = false) => {
+    if (!preserveMenuFilter) {
+      setExternalCategorySelection(null);
+    }
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      const targetHash = TAB_TO_HASH[tab];
+      if (window.location.hash !== targetHash && window.location.hash !== '#admin') {
+        window.history.replaceState(null, '', targetHash);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const handleQuickJumpCategory = (category: MenuCategoryId) => {
     setExternalCategorySelection((prev) => ({
       category,
       seq: (prev?.seq ?? 0) + 1,
     }));
+    handleSelectTab('menu', true);
   };
 
   const totalTrayCount = Object.values(trayQuantities).reduce((sum, count) => sum + count, 0);
@@ -394,74 +456,20 @@ export default function App() {
   const visibleSections = config.sectionOrder.filter(
     (id) => !config.hiddenSections.includes(id)
   );
+  const hasMenuTab = visibleSections.includes('menu');
+  const hasGalleryTab = visibleSections.includes('gallery');
+  const hasReservationsTab =
+    visibleSections.includes('contact') || visibleSections.includes('visit-us');
+
+  const resolvedActiveTab: PageTabId =
+    (activeTab === 'menu' && !hasMenuTab) ||
+    (activeTab === 'gallery' && !hasGalleryTab) ||
+    (activeTab === 'reservations' && !hasReservationsTab)
+      ? 'home'
+      : activeTab;
+
   const heroImageSrc = customImages.hero || CAFE_INFO.heroImage;
   const activeMenuViewMode = visitorMenuViewOverride ?? config.menuViewMode;
-
-  const renderSection = (sectionId: SectionId) => {
-    if (sectionId === 'menu') {
-      return (
-        <MenuSection
-          key="menu"
-          items={config.customMenuItems}
-          customImages={customImages}
-          viewMode={activeMenuViewMode}
-          showSinhalaSubtitles={config.showSinhalaSubtitles}
-          externalCategorySelection={externalCategorySelection}
-          onChangeViewMode={(mode) => setVisitorMenuViewOverride(mode)}
-          trayQuantities={trayQuantities}
-          onAddItem={handleAddItem}
-          onDecrementItem={handleDecrementItem}
-        />
-      );
-    }
-
-    if (sectionId === 'gallery') {
-      return (
-        <CustomPhotoSections
-          key="gallery"
-          sections={config.customPhotoSections}
-          customImages={customImages}
-          canEdit={isOwnerAdmin}
-          onEditSections={
-            isOwnerAdmin ? () => openAdminAccess('photos') : undefined
-          }
-        />
-      );
-    }
-
-    if (sectionId === 'experience') {
-      return (
-        <SriLankanExperienceSection
-          key="experience"
-          bridgeImageSrc={customImages.bridge}
-        />
-      );
-    }
-
-    if (sectionId === 'visit-us') {
-      return (
-        <VisitUsSection
-          key="visit-us"
-          cafeName={config.cafeName}
-          locationLabel={config.locationLabel}
-          openingHours={config.openingHours}
-          phoneDisplay={config.phoneDisplay}
-          whatsappNumber={config.whatsappNumber}
-        />
-      );
-    }
-
-    return (
-      <ContactSection
-        key="contact"
-        cafeName={config.cafeName}
-        locationLabel={config.locationLabel}
-        phoneDisplay={config.phoneDisplay}
-        whatsappNumber={config.whatsappNumber}
-        email={config.email}
-      />
-    );
-  };
 
   return (
     <div
@@ -475,6 +483,8 @@ export default function App() {
         cafeName={config.cafeName}
         trayCount={totalTrayCount}
         visibleSections={visibleSections}
+        activeTab={resolvedActiveTab}
+        onSelectTab={(tab) => handleSelectTab(tab)}
         colorMode={colorMode}
         onToggleColorMode={() =>
           setColorMode((prev) => (prev === 'dark' ? 'light' : 'dark'))
@@ -483,272 +493,344 @@ export default function App() {
       />
 
       <main className="flex-1 overflow-x-clip">
-        {/* 01. Home (Hero Terrace Section) */}
-        <section id="home" className="relative scroll-mt-16">
-          {config.heroLayout === 'panoramic' ? (
-            <div className="relative overflow-hidden bg-[#23160D]">
-              <div className="min-h-[500px] sm:min-h-[560px] lg:min-h-[600px] w-full relative">
-                <ResilientImage
-                  src={heroImageSrc}
-                  alt={`${config.cafeName} wooden village veranda overlooking tea hills in ${config.locationLabel}`}
-                  fallbackLabel={`${config.cafeName} · ${config.locationLabel}`}
-                  className="absolute inset-0 w-full h-full object-cover brightness-[0.88] saturate-[1.05]"
-                />
-
-                {/* Centered warm Sri Lankan jak-wood gradient scrim */}
-                <div
-                  aria-hidden="true"
-                  className="absolute inset-0"
-                  style={{
-                    background:
-                      'radial-gradient(ellipse at center, rgba(36, 22, 13, 0.86) 0%, rgba(36, 22, 13, 0.72) 55%, rgba(36, 22, 13, 0.48) 100%)',
-                  }}
-                />
-
-                <div className="relative max-w-[1240px] mx-auto px-5 sm:px-8 pt-5 sm:pt-8 pb-22 sm:pb-26">
-                  <div className="max-w-3xl mx-auto text-center flex flex-col items-center">
-                    <AyubowanLockup
-                      greeting={config.ayubowanGreeting}
-                      tone="dark"
-                      centered
-                    />
-
-                    <h1 className="font-display text-[clamp(2.75rem,5.2vw,4.35rem)] leading-[1.08] font-medium tracking-tight text-[#FAF4E8] text-balance">
-                      {config.heroHeadline}
-                      {config.heroAccentLine && (
-                        <span className="block italic font-normal text-[#F2B449] mt-1">
-                          {config.heroAccentLine}
-                        </span>
-                      )}
-                    </h1>
-
-                    <p className="text-base sm:text-xl text-[#EFE6D5] max-w-2xl mx-auto leading-relaxed mt-4 mb-5">
-                      {config.heroSubtitle}
-                    </p>
-
-                    {/* Subtle Sri Lankan lotus hairline divider */}
-                    <div
-                      className="flex items-center gap-3 w-full max-w-xs mx-auto mb-6"
-                      aria-hidden="true"
-                    >
-                      <span className="h-px flex-1 bg-[#E2A43B]/45" />
-                      <svg
-                        width="20"
-                        height="14"
-                        viewBox="0 0 24 16"
-                        fill="none"
-                        className="text-[#F2B449] shrink-0"
-                      >
-                        <path
-                          d="M12 2C14.2 5.2 14.2 9.4 12 13C9.8 9.4 9.8 5.2 12 2Z"
-                          stroke="currentColor"
-                          strokeWidth="1.3"
-                        />
-                        <path
-                          d="M6.5 5.2C9.5 6.8 11 9.8 11.4 13C8.2 12.2 6.2 9.2 6.5 5.2Z"
-                          stroke="currentColor"
-                          strokeWidth="1.3"
-                        />
-                        <path
-                          d="M17.5 5.2C14.5 6.8 13 9.8 12.6 13C15.8 12.2 17.8 9.2 17.5 5.2Z"
-                          stroke="currentColor"
-                          strokeWidth="1.3"
-                        />
-                      </svg>
-                      <span className="h-px flex-1 bg-[#E2A43B]/45" />
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-center gap-3.5">
-                      <a
-                        href="#traditional-menu"
-                        className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-semibold rounded-full transition-transform hover:-translate-y-0.5 whitespace-nowrap shrink-0"
-                        style={{
-                          backgroundColor: '#E2A43B',
-                          color: '#24160D',
-                        }}
-                      >
-                        <UtensilsCrossed className="w-4 h-4" />
-                        <span>Explore Traditional Menu</span>
-                      </a>
-
-                      <a
-                        href="#visit-us"
-                        className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-medium text-[#FAF4E8] border border-[#FAF4E8]/60 hover:bg-white/10 rounded-full transition-colors whitespace-nowrap shrink-0"
-                      >
-                        <MapPin className="w-4 h-4" />
-                        <span>Visit Us</span>
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Curved Sri Lankan wave transition into handloom parchment */}
-              <div className="relative -mt-12 sm:-mt-16 z-20 pointer-events-none">
-                <svg
-                  viewBox="0 0 1440 90"
-                  fill="none"
-                  preserveAspectRatio="none"
-                  className="w-full h-12 sm:h-16 block"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M0 34C260 88 540 2 760 44C980 86 1220 18 1440 48V90H0V34Z"
-                    fill="var(--canvas)"
-                  />
-                </svg>
-                <a
-                  href="#our-story"
-                  aria-label="Scroll to Our Story"
-                  className="pointer-events-auto absolute left-1/2 -translate-x-1/2 -top-4 w-10 h-10 rounded-full border border-[#E2A43B]/70 bg-[#2C1D13]/90 text-[#F2B449] inline-flex items-center justify-center hover:scale-105 transition-transform shadow-sm"
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </a>
-              </div>
-            </div>
-          ) : (
-            /* Editorial Split Hero Layout */
-            <div className="pt-8 pb-10">
-              <div className="max-w-[1240px] mx-auto px-5 sm:px-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-                <div
-                  className="lg:col-span-6 border rounded-2xl p-7 sm:p-10 flex flex-col justify-between"
-                  style={{
-                    backgroundColor: 'var(--surface)',
-                    borderColor: 'var(--border-color)',
-                  }}
-                >
-                  <div>
-                    <AyubowanLockup
-                      greeting={config.ayubowanGreeting}
-                      tone={colorMode === 'dark' ? 'dark' : 'light'}
-                    />
-                    <h1
-                      className="font-display text-[clamp(2.45rem,4vw,3.75rem)] leading-[1.08] font-medium tracking-tight mb-4 text-balance"
-                      style={{ color: 'var(--text-primary)' }}
-                    >
-                      {config.heroHeadline}
-                      {config.heroAccentLine && (
-                        <span
-                          className="block italic font-normal mt-1"
-                          style={{ color: 'var(--accent)' }}
-                        >
-                          {config.heroAccentLine}
-                        </span>
-                      )}
-                    </h1>
-                    <p
-                      className="text-base sm:text-lg leading-relaxed mb-7 max-w-xl"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
-                      {config.heroSubtitle}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3.5 pt-4">
-                    <a
-                      href="#traditional-menu"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-semibold text-white rounded-full transition-colors whitespace-nowrap shrink-0"
-                      style={{ backgroundColor: 'var(--accent)' }}
-                    >
-                      <UtensilsCrossed className="w-4 h-4" />
-                      <span>Explore Traditional Menu</span>
-                    </a>
-                    <a
-                      href="#visit-us"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-medium border rounded-full whitespace-nowrap shrink-0"
-                      style={{
-                        borderColor: 'var(--border-color)',
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      <MapPin className="w-4 h-4" />
-                      <span>Visit Us</span>
-                    </a>
-                  </div>
-                </div>
-
-                <div className="lg:col-span-6 flex">
-                  <div
-                    className="w-full rounded-2xl overflow-hidden border"
-                    style={{ borderColor: 'var(--border-color)' }}
-                  >
+        {/* TAB 01: Home (Hero + Quick Café Info Strip) */}
+        {resolvedActiveTab === 'home' && (
+          <>
+            <section id="home" className="relative scroll-mt-16">
+              {config.heroLayout === 'panoramic' ? (
+                <div className="relative overflow-hidden bg-[#23160D]">
+                  <div className="min-h-[500px] sm:min-h-[560px] lg:min-h-[600px] w-full relative">
                     <ResilientImage
                       src={heroImageSrc}
                       alt={`${config.cafeName} wooden village veranda overlooking tea hills in ${config.locationLabel}`}
                       fallbackLabel={`${config.cafeName} · ${config.locationLabel}`}
-                      className="w-full aspect-[4/3] lg:aspect-auto lg:h-full object-cover"
+                      className="absolute inset-0 w-full h-full object-cover brightness-[0.88] saturate-[1.05]"
                     />
+
+                    {/* Centered warm Sri Lankan jak-wood gradient scrim */}
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0"
+                      style={{
+                        background:
+                          'radial-gradient(ellipse at center, rgba(36, 22, 13, 0.86) 0%, rgba(36, 22, 13, 0.72) 55%, rgba(36, 22, 13, 0.48) 100%)',
+                      }}
+                    />
+
+                    <div className="relative max-w-[1240px] mx-auto px-5 sm:px-8 pt-5 sm:pt-8 pb-22 sm:pb-26">
+                      <div className="max-w-3xl mx-auto text-center flex flex-col items-center">
+                        <AyubowanLockup
+                          greeting={config.ayubowanGreeting}
+                          tone="dark"
+                          centered
+                        />
+
+                        <h1 className="font-display text-[clamp(2.75rem,5.2vw,4.35rem)] leading-[1.08] font-medium tracking-tight text-[#FAF4E8] text-balance">
+                          {config.heroHeadline}
+                          {config.heroAccentLine && (
+                            <span className="block italic font-normal text-[#F2B449] mt-1">
+                              {config.heroAccentLine}
+                            </span>
+                          )}
+                        </h1>
+
+                        <p className="text-base sm:text-xl text-[#EFE6D5] max-w-2xl mx-auto leading-relaxed mt-4 mb-5">
+                          {config.heroSubtitle}
+                        </p>
+
+                        {/* Subtle Sri Lankan lotus hairline divider */}
+                        <div
+                          className="flex items-center gap-3 w-full max-w-xs mx-auto mb-6"
+                          aria-hidden="true"
+                        >
+                          <span className="h-px flex-1 bg-[#E2A43B]/45" />
+                          <svg
+                            width="20"
+                            height="14"
+                            viewBox="0 0 24 16"
+                            fill="none"
+                            className="text-[#F2B449] shrink-0"
+                          >
+                            <path
+                              d="M12 2C14.2 5.2 14.2 9.4 12 13C9.8 9.4 9.8 5.2 12 2Z"
+                              stroke="currentColor"
+                              strokeWidth="1.3"
+                            />
+                            <path
+                              d="M6.5 5.2C9.5 6.8 11 9.8 11.4 13C8.2 12.2 6.2 9.2 6.5 5.2Z"
+                              stroke="currentColor"
+                              strokeWidth="1.3"
+                            />
+                            <path
+                              d="M17.5 5.2C14.5 6.8 13 9.8 12.6 13C15.8 12.2 17.8 9.2 17.5 5.2Z"
+                              stroke="currentColor"
+                              strokeWidth="1.3"
+                            />
+                          </svg>
+                          <span className="h-px flex-1 bg-[#E2A43B]/45" />
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-center gap-3.5">
+                          {hasMenuTab && (
+                            <button
+                              type="button"
+                              onClick={() => handleSelectTab('menu')}
+                              className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-semibold rounded-full transition-transform hover:-translate-y-0.5 whitespace-nowrap shrink-0 cursor-pointer"
+                              style={{
+                                backgroundColor: '#E2A43B',
+                                color: '#24160D',
+                              }}
+                            >
+                              <UtensilsCrossed className="w-4 h-4" />
+                              <span>Explore Traditional Menu</span>
+                            </button>
+                          )}
+
+                          {hasReservationsTab && (
+                            <button
+                              type="button"
+                              onClick={() => handleSelectTab('reservations')}
+                              className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-medium text-[#FAF4E8] border border-[#FAF4E8]/60 hover:bg-white/10 rounded-full transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                            >
+                              <MapPin className="w-4 h-4" />
+                              <span>Visit Us &amp; Reserve</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Curved Sri Lankan wave transition into handloom parchment */}
+                  <div className="relative -mt-12 sm:-mt-16 z-20 pointer-events-none">
+                    <svg
+                      viewBox="0 0 1440 90"
+                      fill="none"
+                      preserveAspectRatio="none"
+                      className="w-full h-12 sm:h-16 block"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M0 34C260 88 540 2 760 44C980 86 1220 18 1440 48V90H0V34Z"
+                        fill="var(--canvas)"
+                      />
+                    </svg>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTab('our-story')}
+                      aria-label="Open Our Story tab"
+                      className="pointer-events-auto absolute left-1/2 -translate-x-1/2 -top-4 w-10 h-10 rounded-full border border-[#E2A43B]/70 bg-[#2C1D13]/90 text-[#F2B449] inline-flex items-center justify-center hover:scale-105 transition-transform shadow-sm cursor-pointer"
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
+              ) : (
+                /* Editorial Split Hero Layout */
+                <div className="pt-8 pb-10">
+                  <div className="max-w-[1240px] mx-auto px-5 sm:px-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+                    <div
+                      className="lg:col-span-6 border rounded-2xl p-7 sm:p-10 flex flex-col justify-between"
+                      style={{
+                        backgroundColor: 'var(--surface)',
+                        borderColor: 'var(--border-color)',
+                      }}
+                    >
+                      <div>
+                        <AyubowanLockup
+                          greeting={config.ayubowanGreeting}
+                          tone={colorMode === 'dark' ? 'dark' : 'light'}
+                        />
+                        <h1
+                          className="font-display text-[clamp(2.45rem,4vw,3.75rem)] leading-[1.08] font-medium tracking-tight mb-4 text-balance"
+                          style={{ color: 'var(--text-primary)' }}
+                        >
+                          {config.heroHeadline}
+                          {config.heroAccentLine && (
+                            <span
+                              className="block italic font-normal mt-1"
+                              style={{ color: 'var(--accent)' }}
+                            >
+                              {config.heroAccentLine}
+                            </span>
+                          )}
+                        </h1>
+                        <p
+                          className="text-base sm:text-lg leading-relaxed mb-7 max-w-xl"
+                          style={{ color: 'var(--text-secondary)' }}
+                        >
+                          {config.heroSubtitle}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3.5 pt-4">
+                        {hasMenuTab && (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTab('menu')}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-semibold text-white rounded-full transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                            style={{ backgroundColor: 'var(--accent)' }}
+                          >
+                            <UtensilsCrossed className="w-4 h-4" />
+                            <span>Explore Traditional Menu</span>
+                          </button>
+                        )}
+                        {hasReservationsTab && (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTab('reservations')}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-medium border rounded-full whitespace-nowrap shrink-0 cursor-pointer"
+                            style={{
+                              borderColor: 'var(--border-color)',
+                              color: 'var(--text-primary)',
+                            }}
+                          >
+                            <MapPin className="w-4 h-4" />
+                            <span>Visit Us &amp; Reserve</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-6 flex">
+                      <div
+                        className="w-full rounded-2xl overflow-hidden border"
+                        style={{ borderColor: 'var(--border-color)' }}
+                      >
+                        <ResilientImage
+                          src={heroImageSrc}
+                          alt={`${config.cafeName} wooden village veranda overlooking tea hills in ${config.locationLabel}`}
+                          fallbackLabel={`${config.cafeName} · ${config.locationLabel}`}
+                          className="w-full aspect-[4/3] lg:aspect-auto lg:h-full object-cover"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Read-Only Café Info Strip on Home Tab */}
+            <div className="max-w-[1240px] mx-auto px-5 sm:px-8 pt-6 pb-14">
+              <div
+                className="border rounded-xl overflow-hidden"
+                style={{
+                  backgroundColor: 'var(--surface)',
+                  borderColor: 'var(--border-color)',
+                }}
+              >
+                <dl
+                  className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x"
+                  style={{ borderColor: 'var(--border-color)' }}
+                >
+                  <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
+                    <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Opening Hours
+                    </dt>
+                    <dd className="text-sm font-medium font-mono-tabular">
+                      {config.openingHours}
+                    </dd>
+                  </div>
+                  <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
+                    <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Village Location
+                    </dt>
+                    <dd className="text-sm font-medium">{config.locationLabel}</dd>
+                  </div>
+                  <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
+                    <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Kitchen Selection
+                    </dt>
+                    <dd className="text-sm font-medium font-mono-tabular">
+                      {availableItemsCount} Dishes &amp; Drinks
+                    </dd>
+                  </div>
+                  <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
+                    <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      WhatsApp Orders
+                    </dt>
+                    <dd className="text-sm font-medium font-mono-tabular">
+                      <a
+                        href={`https://wa.me/${config.whatsappNumber}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        {config.phoneDisplay}
+                      </a>
+                    </dd>
+                  </div>
+                </dl>
               </div>
             </div>
-          )}
-        </section>
+          </>
+        )}
 
-        {/* 02. Our Story + Quick Menu Directory + Village Hospitality Strip */}
-        <StoryMenuBand
-          cafeName={config.cafeName}
-          customImages={customImages}
-          onQuickJumpCategory={handleQuickJumpCategory}
-        />
+        {/* TAB 02: Our Story & Sri Lankan Experience */}
+        {resolvedActiveTab === 'our-story' && (
+          <>
+            <StoryMenuBand
+              cafeName={config.cafeName}
+              customImages={customImages}
+              onQuickJumpCategory={handleQuickJumpCategory}
+            />
+            {visibleSections.includes('experience') && (
+              <SriLankanExperienceSection bridgeImageSrc={customImages.bridge} />
+            )}
+          </>
+        )}
 
-        {/* Read-Only Café Info Strip for Visitors */}
-        <div className="max-w-[1240px] mx-auto px-5 sm:px-8 pb-12">
-          <div
-            className="border rounded-xl overflow-hidden"
-            style={{
-              backgroundColor: 'var(--surface)',
-              borderColor: 'var(--border-color)',
-            }}
-          >
-            <dl
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x"
-              style={{ borderColor: 'var(--border-color)' }}
-            >
-              <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
-                <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Opening Hours
-                </dt>
-                <dd className="text-sm font-medium font-mono-tabular">
-                  {config.openingHours}
-                </dd>
-              </div>
-              <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
-                <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Village Location
-                </dt>
-                <dd className="text-sm font-medium">{config.locationLabel}</dd>
-              </div>
-              <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
-                <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Kitchen Selection
-                </dt>
-                <dd className="text-sm font-medium font-mono-tabular">
-                  {availableItemsCount} Dishes &amp; Drinks
-                </dd>
-              </div>
-              <div className="px-5 py-3.5" style={{ borderColor: 'var(--border-color)' }}>
-                <dt className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>
-                  WhatsApp Orders
-                </dt>
-                <dd className="text-sm font-medium font-mono-tabular">
-                  <a
-                    href={`https://wa.me/${config.whatsappNumber}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:underline"
-                    style={{ color: 'var(--accent)' }}
-                  >
-                    {config.phoneDisplay}
-                  </a>
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </div>
+        {/* TAB 03: Traditional Menu */}
+        {resolvedActiveTab === 'menu' && hasMenuTab && (
+          <MenuSection
+            items={config.customMenuItems}
+            customImages={customImages}
+            viewMode={activeMenuViewMode}
+            showSinhalaSubtitles={config.showSinhalaSubtitles}
+            externalCategorySelection={externalCategorySelection}
+            onChangeViewMode={(mode) => setVisitorMenuViewOverride(mode)}
+            trayQuantities={trayQuantities}
+            onAddItem={handleAddItem}
+            onDecrementItem={handleDecrementItem}
+          />
+        )}
 
-        {/* 03. Traditional Menu · 04. Gallery · 05. Sri Lankan Experience · 06. Visit Us · 07. Contact */}
-        {visibleSections.map((sectionId) => renderSection(sectionId))}
+        {/* TAB 04: Gallery */}
+        {resolvedActiveTab === 'gallery' && hasGalleryTab && (
+          <CustomPhotoSections
+            sections={config.customPhotoSections}
+            customImages={customImages}
+            canEdit={isOwnerAdmin}
+            onEditSections={
+              isOwnerAdmin ? () => openAdminAccess('photos') : undefined
+            }
+          />
+        )}
+
+        {/* TAB 05: Reservations & Visit Us */}
+        {resolvedActiveTab === 'reservations' && hasReservationsTab && (
+          <>
+            {visibleSections.includes('visit-us') && (
+              <VisitUsSection
+                cafeName={config.cafeName}
+                locationLabel={config.locationLabel}
+                openingHours={config.openingHours}
+                phoneDisplay={config.phoneDisplay}
+                whatsappNumber={config.whatsappNumber}
+              />
+            )}
+            {visibleSections.includes('contact') && (
+              <ContactSection
+                cafeName={config.cafeName}
+                locationLabel={config.locationLabel}
+                phoneDisplay={config.phoneDisplay}
+                whatsappNumber={config.whatsappNumber}
+                email={config.email}
+              />
+            )}
+          </>
+        )}
       </main>
 
       {/* Dark Jak-Wood Espresso Footer ("Let's Connect") */}
@@ -773,39 +855,46 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5 text-xs font-medium text-[#EFE6D5]">
-            <a href="#home" className="hover:text-[#F2B449] whitespace-nowrap">
+            <button
+              type="button"
+              onClick={() => handleSelectTab('home')}
+              className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+            >
               Home
-            </a>
-            <a href="#our-story" className="hover:text-[#F2B449] whitespace-nowrap">
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectTab('our-story')}
+              className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+            >
               Our Story
-            </a>
-            {visibleSections.includes('menu') && (
-              <a href="#traditional-menu" className="hover:text-[#F2B449] whitespace-nowrap">
-                Traditional Menu
-              </a>
-            )}
-            {visibleSections.includes('gallery') && (
-              <a href="#gallery" className="hover:text-[#F2B449] whitespace-nowrap">
-                Gallery
-              </a>
-            )}
-            {visibleSections.includes('experience') && (
-              <a
-                href="#sri-lankan-experience"
-                className="hover:text-[#F2B449] whitespace-nowrap"
+            </button>
+            {hasMenuTab && (
+              <button
+                type="button"
+                onClick={() => handleSelectTab('menu')}
+                className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
               >
-                Sri Lankan Experience
-              </a>
+                Traditional Menu
+              </button>
             )}
-            {visibleSections.includes('visit-us') && (
-              <a href="#visit-us" className="hover:text-[#F2B449] whitespace-nowrap">
-                Visit Us
-              </a>
+            {hasGalleryTab && (
+              <button
+                type="button"
+                onClick={() => handleSelectTab('gallery')}
+                className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+              >
+                Gallery
+              </button>
             )}
-            {visibleSections.includes('contact') && (
-              <a href="#contact" className="hover:text-[#F2B449] whitespace-nowrap">
+            {hasReservationsTab && (
+              <button
+                type="button"
+                onClick={() => handleSelectTab('reservations')}
+                className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+              >
                 Reservations
-              </a>
+              </button>
             )}
             <a
               href={`https://wa.me/${config.whatsappNumber}`}

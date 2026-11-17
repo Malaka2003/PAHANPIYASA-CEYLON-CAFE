@@ -2,10 +2,19 @@ import { useState } from 'react';
 import { Menu, Moon, Sun, X } from 'lucide-react';
 import { SectionId } from '../types/siteConfig';
 
+export type PageTabId =
+  | 'home'
+  | 'our-story'
+  | 'menu'
+  | 'gallery'
+  | 'reservations';
+
 interface NavbarProps {
   cafeName: string;
   trayCount: number;
   visibleSections: SectionId[];
+  activeTab: PageTabId;
+  onSelectTab: (tab: PageTabId) => void;
   colorMode: 'light' | 'dark';
   onToggleColorMode: () => void;
   onOpenTray: () => void;
@@ -15,62 +24,62 @@ export function Navbar({
   cafeName,
   trayCount,
   visibleSections,
+  activeTab,
+  onSelectTab,
   colorMode,
   onToggleColorMode,
   onOpenTray,
 }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Strict 3-zone top bar: keep desktop nav to 5 concise single-line links
-  const desktopLinks = [
-    { href: '#home', label: 'Home', show: true },
-    { href: '#our-story', label: 'Our Story', show: true },
+  const hasMenu = visibleSections.includes('menu');
+  const hasGallery = visibleSections.includes('gallery');
+  const hasReservations =
+    visibleSections.includes('contact') || visibleSections.includes('visit-us');
+
+  const allTabs: {
+    id: PageTabId;
+    href: string;
+    label: string;
+    mobileLabel: string;
+    show: boolean;
+  }[] = [
+    { id: 'home', href: '#home', label: 'Home', mobileLabel: '01. Home', show: true },
     {
+      id: 'our-story',
+      href: '#our-story',
+      label: 'Our Story',
+      mobileLabel: '02. Our Story',
+      show: true,
+    },
+    {
+      id: 'menu',
       href: '#traditional-menu',
       label: 'Traditional Menu',
-      show: visibleSections.includes('menu'),
+      mobileLabel: '03. Traditional Menu',
+      show: hasMenu,
     },
     {
+      id: 'gallery',
       href: '#gallery',
       label: 'Gallery',
-      show: visibleSections.includes('gallery'),
+      mobileLabel: '04. Gallery',
+      show: hasGallery,
     },
     {
-      href: '#contact',
+      id: 'reservations',
+      href: '#reservations',
       label: 'Reservations',
-      show: visibleSections.includes('contact'),
+      mobileLabel: '05. Reservations & Visit Us',
+      show: hasReservations,
     },
-  ].filter((link) => link.show);
+  ];
+  const navTabs = allTabs.filter((tab) => tab.show);
 
-  const mobileLinks = [
-    { href: '#home', label: '01. Home', show: true },
-    { href: '#our-story', label: '02. Our Story', show: true },
-    {
-      href: '#traditional-menu',
-      label: '03. Traditional Menu',
-      show: visibleSections.includes('menu'),
-    },
-    {
-      href: '#gallery',
-      label: '04. Gallery',
-      show: visibleSections.includes('gallery'),
-    },
-    {
-      href: '#sri-lankan-experience',
-      label: '05. Sri Lankan Experience',
-      show: visibleSections.includes('experience'),
-    },
-    {
-      href: '#visit-us',
-      label: '06. Visit Us',
-      show: visibleSections.includes('visit-us'),
-    },
-    {
-      href: '#contact',
-      label: '07. Contact & Reservations',
-      show: visibleSections.includes('contact'),
-    },
-  ].filter((link) => link.show);
+  const handleTabClick = (tabId: PageTabId) => {
+    onSelectTab(tabId);
+    setMobileMenuOpen(false);
+  };
 
   return (
     <header
@@ -81,10 +90,11 @@ export function Navbar({
       }}
     >
       <div className="max-w-[1240px] mx-auto px-3.5 sm:px-6 lg:px-8 min-h-16 py-2 flex items-center justify-between gap-2.5 sm:gap-4 lg:gap-6">
-        {/* Zone 1: Brand Emblem + Responsive Wordmark (never overflows mobile width) */}
-        <a
-          href="#home"
-          className="inline-flex items-center gap-2 sm:gap-2.5 min-w-0 shrink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E2A43B] rounded-sm"
+        {/* Zone 1: Brand Emblem + Responsive Wordmark */}
+        <button
+          type="button"
+          onClick={() => handleTabClick('home')}
+          className="inline-flex items-center gap-2 sm:gap-2.5 min-w-0 shrink text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E2A43B] rounded-sm"
         >
           <svg
             width="26"
@@ -122,22 +132,33 @@ export function Navbar({
           <span className="font-display text-[13px] min-[390px]:text-sm sm:text-base lg:text-lg leading-[1.15] font-medium tracking-tight text-[#FAF4E8] sm:whitespace-nowrap">
             {cafeName}
           </span>
-        </a>
+        </button>
 
-        {/* Zone 2: 5 concise single-line text links (desktop 1024px+) */}
+        {/* Zone 2: 5 concise single-line section tabs (desktop 1024px+) */}
         <nav
           aria-label="Primary navigation"
+          role="tablist"
           className="hidden lg:flex items-center gap-5 xl:gap-6 text-[13px] xl:text-sm font-medium text-[#EFE6D5]"
         >
-          {desktopLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="whitespace-nowrap shrink-0 py-1 hover:text-[#F2B449] underline-offset-8 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E2A43B] rounded-sm"
-            >
-              {link.label}
-            </a>
-          ))}
+          {navTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => handleTabClick(tab.id)}
+                className={`whitespace-nowrap shrink-0 py-1.5 border-b-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E2A43B] rounded-t-sm ${
+                  isActive
+                    ? 'text-[#F2B449] border-[#F2B449] font-semibold'
+                    : 'text-[#EFE6D5] border-transparent hover:text-[#F2B449]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Zone 3: Theme toggle + primary action + mobile drawer toggle */}
@@ -194,16 +215,23 @@ export function Navbar({
             borderColor: 'rgba(229, 216, 191, 0.16)',
           }}
         >
-          {mobileLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2.5 px-2.5 text-sm font-medium text-[#FAF4E8] hover:text-[#F2B449] hover:bg-white/5 rounded-md transition-colors"
-            >
-              {link.label}
-            </a>
-          ))}
+          {navTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleTabClick(tab.id)}
+                className={`w-full text-left py-2.5 px-3 text-sm font-medium rounded-md transition-colors cursor-pointer ${
+                  isActive
+                    ? 'text-[#F2B449] bg-white/10 font-semibold'
+                    : 'text-[#FAF4E8] hover:text-[#F2B449] hover:bg-white/5'
+                }`}
+              >
+                {tab.mobileLabel}
+              </button>
+            );
+          })}
 
           <button
             type="button"
@@ -211,7 +239,7 @@ export function Navbar({
               onToggleColorMode();
               setMobileMenuOpen(false);
             }}
-            className="mt-1 pt-2.5 pb-2 px-2.5 border-t flex items-center gap-2.5 text-sm font-medium text-[#F2B449] hover:bg-white/5 rounded-md transition-colors cursor-pointer text-left"
+            className="mt-1 pt-2.5 pb-2 px-3 border-t flex items-center gap-2.5 text-sm font-medium text-[#F2B449] hover:bg-white/5 rounded-md transition-colors cursor-pointer text-left"
             style={{ borderColor: 'rgba(229, 216, 191, 0.14)' }}
           >
             {colorMode === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
