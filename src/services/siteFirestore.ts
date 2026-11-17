@@ -11,7 +11,7 @@ import {
   setDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { CAFE_INFO, MENU_ITEMS, MenuItem } from '../data/cafeData';
+import { CAFE_INFO, MENU_ITEMS, MenuItem, MenuItemOption } from '../data/cafeData';
 import {
   OperationType,
   db,
@@ -98,6 +98,25 @@ function buildMenuItemPayload(item: MenuItem, sortOrder: number, uid: string) {
   if (sinhala) payload.sinhalaName = sinhala;
   const price = clampStr(item.priceLkr, 30);
   if (price) payload.priceLkr = price;
+
+  if (Array.isArray(item.options)) {
+    const safeOptions: MenuItemOption[] = item.options
+      .slice(0, 20)
+      .filter((opt) => opt && clampStr(opt.name, 80).length > 0)
+      .map((opt, idx) => {
+        const entry: MenuItemOption = {
+          id: sanitizeId(opt.id || `opt-${idx + 1}`, `opt-${idx + 1}`),
+          name: clampStr(opt.name, 80),
+          available: opt.available !== false,
+        };
+        const optSinhala = clampStr(opt.sinhalaName, 80);
+        if (optSinhala) entry.sinhalaName = optSinhala;
+        const optPrice = clampStr(opt.priceLkr, 30);
+        if (optPrice) entry.priceLkr = optPrice;
+        return entry;
+      });
+    payload.options = safeOptions;
+  }
 
   return { id, payload };
 }
@@ -190,6 +209,22 @@ export function subscribeStorefrontData({
       } else {
         const items: MenuItem[] = snap.docs.map((d) => {
           const data = d.data();
+          const rawOptions = Array.isArray(data.options) ? data.options : undefined;
+          const options: MenuItemOption[] | undefined = rawOptions
+            ? rawOptions
+                .filter(
+                  (opt): opt is Record<string, unknown> =>
+                    Boolean(opt) && typeof opt === 'object' && typeof (opt as { name?: unknown }).name === 'string'
+                )
+                .map((opt, idx) => ({
+                  id: typeof opt.id === 'string' && opt.id ? opt.id : `opt-${idx + 1}`,
+                  name: String(opt.name),
+                  sinhalaName: typeof opt.sinhalaName === 'string' ? opt.sinhalaName : undefined,
+                  priceLkr: typeof opt.priceLkr === 'string' ? opt.priceLkr : undefined,
+                  available: opt.available !== false,
+                }))
+            : undefined;
+
           return {
             id: data.id || d.id,
             name: data.name,
@@ -201,6 +236,7 @@ export function subscribeStorefrontData({
             styleTag: data.styleTag ?? 'Prepared Fresh',
             priceLkr: data.priceLkr,
             available: data.available !== false,
+            options,
           };
         });
         onMenuItems(items);
@@ -238,7 +274,7 @@ export function subscribeStorefrontData({
   );
 
   const unsubMedia = onSnapshot(
-    query(collection(db, 'siteMedia'), limit(200)),
+    query(collection(db, 'siteMedia'), limit(500)),
     (snap) => {
       const nextMap: CustomImagesMap = {};
       for (const docSnap of snap.docs) {

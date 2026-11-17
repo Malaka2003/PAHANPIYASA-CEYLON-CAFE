@@ -19,6 +19,14 @@ export interface MenuCategory {
   imageAlt: string;
 }
 
+export interface MenuItemOption {
+  id: string;
+  name: string;
+  sinhalaName?: string;
+  priceLkr?: string;
+  available?: boolean;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -30,6 +38,28 @@ export interface MenuItem {
   styleTag: string;
   priceLkr?: string;
   available?: boolean;
+  options?: MenuItemOption[];
+}
+
+export function getOptionMediaSlotKey(itemId: string, optionId: string): string {
+  return `opt:${itemId}:${optionId}`;
+}
+
+export function getTrayItemKey(itemId: string, optionId?: string): string {
+  return optionId ? `${itemId}::${optionId}` : itemId;
+}
+
+export function parseTrayItemKey(trayKey: string): {
+  itemId: string;
+  optionId?: string;
+} {
+  const sepIndex = trayKey.indexOf('::');
+  if (sepIndex === -1) {
+    return { itemId: trayKey };
+  }
+  const itemId = trayKey.slice(0, sepIndex);
+  const optionId = trayKey.slice(sepIndex + 2);
+  return optionId ? { itemId, optionId } : { itemId };
 }
 
 export const SRI_LANKA_THEMES: Record<ThemeId, ThemePalette> = {

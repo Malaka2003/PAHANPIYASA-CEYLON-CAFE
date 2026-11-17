@@ -176,6 +176,10 @@
         "available": {
           "type": "boolean"
         },
+        "options": {
+          "type": "array",
+          "description": "Bounded list of up to 20 dish variant options (e.g. With Chicken, With Fish, Normal) with individual LKR prices."
+        },
         "sortOrder": {
           "type": "number"
         },

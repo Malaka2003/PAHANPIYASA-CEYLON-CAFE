@@ -17,8 +17,10 @@ import {
   MENU_ITEMS,
   MenuCategoryId,
   MenuItem,
+  MenuItemOption,
   SRI_LANKA_DARK_THEMES,
   SRI_LANKA_THEMES,
+  getTrayItemKey,
 } from './data/cafeData';
 import { auth, isVerifiedOwnerAdmin } from './firebase';
 import {
@@ -353,24 +355,25 @@ export default function App() {
     }
   }, [trayQuantities]);
 
-  const handleAddItem = (item: MenuItem) => {
+  const handleAddItem = (item: MenuItem, option?: MenuItemOption) => {
+    const trayKey = getTrayItemKey(item.id, option?.id);
     setTrayQuantities((prev) => ({
       ...prev,
-      [item.id]: (prev[item.id] ?? 0) + 1,
+      [trayKey]: (prev[trayKey] ?? 0) + 1,
     }));
   };
 
-  const handleDecrementItem = (itemId: string) => {
+  const handleDecrementItem = (trayKey: string) => {
     setTrayQuantities((prev) => {
-      const current = prev[itemId] ?? 0;
+      const current = prev[trayKey] ?? 0;
       if (current <= 1) {
         const next = { ...prev };
-        delete next[itemId];
+        delete next[trayKey];
         return next;
       }
       return {
         ...prev,
-        [itemId]: current - 1,
+        [trayKey]: current - 1,
       };
     });
   };

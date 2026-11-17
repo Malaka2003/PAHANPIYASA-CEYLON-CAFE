@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { Check, Copy, MessageCircle, Minus, Plus, Trash2, X } from 'lucide-react';
-import { MenuItem } from '../data/cafeData';
+import {
+  MenuItem,
+  MenuItemOption,
+  parseTrayItemKey,
+} from '../data/cafeData';
 
 interface OrderTrayDrawerProps {
   isOpen: boolean;
@@ -9,9 +13,17 @@ interface OrderTrayDrawerProps {
   whatsappNumber: string;
   menuItems: MenuItem[];
   trayQuantities: Record<string, number>;
-  onAddItem: (item: MenuItem) => void;
-  onDecrementItem: (itemId: string) => void;
+  onAddItem: (item: MenuItem, option?: MenuItemOption) => void;
+  onDecrementItem: (trayKey: string) => void;
   onClearTray: () => void;
+}
+
+interface ResolvedTrayEntry {
+  trayKey: string;
+  item: MenuItem;
+  option?: MenuItemOption;
+  qty: number;
+  unitPrice?: string;
 }
 
 export function OrderTrayDrawer({
@@ -31,12 +43,26 @@ export function OrderTrayDrawer({
 
   if (!isOpen) return null;
 
-  const selectedItems = menuItems
-    .filter((item) => (trayQuantities[item.id] ?? 0) > 0)
-    .map((item) => ({
+  const menuMap = new Map(menuItems.map((item) => [item.id, item]));
+  const selectedItems: ResolvedTrayEntry[] = [];
+
+  for (const [trayKey, qty] of Object.entries(trayQuantities)) {
+    if (!qty || qty <= 0) continue;
+    const { itemId, optionId } = parseTrayItemKey(trayKey);
+    const item = menuMap.get(itemId);
+    if (!item) continue;
+    const option = optionId
+      ? item.options?.find((opt) => opt.id === optionId)
+      : undefined;
+    if (optionId && !option) continue;
+    selectedItems.push({
+      trayKey,
       item,
-      qty: trayQuantities[item.id],
-    }));
+      option,
+      qty,
+      unitPrice: option?.priceLkr || item.priceLkr,
+    });
+  }
 
   const totalCount = selectedItems.reduce((sum, entry) => sum + entry.qty, 0);
 
@@ -46,12 +72,11 @@ export function OrderTrayDrawer({
       `Order Type: ${diningMode}`,
       '',
       'Items:',
-      ...selectedItems.map(
-        (entry) =>
-          `- ${entry.qty}x ${entry.item.name} (${entry.item.categoryLabel})${
-            entry.item.priceLkr ? ` — LKR ${entry.item.priceLkr}` : ''
-          }`
-      ),
+      ...selectedItems.map((entry) => {
+        const variantSuffix = entry.option ? ` — ${entry.option.name}` : '';
+        const priceSuffix = entry.unitPrice ? ` — LKR ${entry.unitPrice}` : '';
+        return `- ${entry.qty}x ${entry.item.name}${variantSuffix} (${entry.item.categoryLabel})${priceSuffix}`;
+      }),
     ];
     if (guestNote.trim()) {
       lines.push('', `Notes: ${guestNote.trim()}`);
@@ -134,7 +159,7 @@ export function OrderTrayDrawer({
                 Add roti, kottu, rice &amp; curry, or chilled tropical drinks from the menu to prepare an order for our kitchen.
               </p>
               <a
-                href="#menu"
+                href="#traditional-menu"
                 onClick={onClose}
                 className="inline-flex items-center justify-center px-4 py-2 min-h-[40px] text-sm font-medium text-white rounded-lg transition-colors"
                 style={{ backgroundColor: 'var(--accent)' }}
@@ -180,17 +205,22 @@ export function OrderTrayDrawer({
                   borderColor: 'var(--border-color)',
                 }}
               >
-                {selectedItems.map(({ item, qty }) => (
+                {selectedItems.map(({ trayKey, item, option, qty, unitPrice }) => (
                   <li
-                    key={item.id}
+                    key={trayKey}
                     className="p-4 flex items-center justify-between gap-3"
                     style={{ borderColor: 'var(--border-color)' }}
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-sm font-medium truncate">
+                        {item.name}
+                        {option && (
+                          <span style={{ color: 'var(--accent)' }}> — {option.name}</span>
+                        )}
+                      </p>
                       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                         {item.categoryLabel}
-                        {item.priceLkr ? ` · LKR ${item.priceLkr}` : ''}
+                        {unitPrice ? ` · LKR ${unitPrice}` : ''}
                       </p>
                     </div>
 
@@ -203,8 +233,8 @@ export function OrderTrayDrawer({
                     >
                       <button
                         type="button"
-                        onClick={() => onDecrementItem(item.id)}
-                        aria-label={`Decrease quantity of ${item.name}`}
+                        onClick={() => onDecrementItem(trayKey)}
+                        aria-label={`Decrease quantity of ${item.name}${option ? ` ${option.name}` : ''}`}
                         className="w-7 h-7 inline-flex items-center justify-center rounded-md cursor-pointer"
                       >
                         <Minus className="w-3.5 h-3.5" />
@@ -214,8 +244,8 @@ export function OrderTrayDrawer({
                       </span>
                       <button
                         type="button"
-                        onClick={() => onAddItem(item)}
-                        aria-label={`Increase quantity of ${item.name}`}
+                        onClick={() => onAddItem(item, option)}
+                        aria-label={`Increase quantity of ${item.name}${option ? ` ${option.name}` : ''}`}
                         className="w-7 h-7 inline-flex items-center justify-center rounded-md cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />

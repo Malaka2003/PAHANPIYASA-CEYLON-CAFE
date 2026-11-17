@@ -4,6 +4,8 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  ChevronDown,
+  ChevronUp,
   Cloud,
   Download,
   ExternalLink,
@@ -30,7 +32,9 @@ import {
   MENU_CATEGORIES,
   MenuCategoryId,
   MenuItem,
+  MenuItemOption,
   SRI_LANKA_THEMES,
+  getOptionMediaSlotKey,
 } from '../data/cafeData';
 import { auth, isVerifiedOwnerAdmin } from '../firebase';
 import { clearOtpSessionToken } from '../services/adminOtp';
@@ -431,9 +435,12 @@ export function AdminDashboard({
   const handleDeleteMenuItem = async (itemId: string) => {
     await runMutation('Removing dish...', async () => {
       await ensureSeededCollections();
-      const slotKey = `item:${itemId}`;
-      if (customImages[slotKey]) {
-        await deleteSiteMediaFromFirestore(slotKey, currentUser);
+      const dishSlotKey = `item:${itemId}`;
+      const optionPrefix = `opt:${itemId}:`;
+      for (const slotKey of Object.keys(customImages)) {
+        if (slotKey === dishSlotKey || slotKey.startsWith(optionPrefix)) {
+          await deleteSiteMediaFromFirestore(slotKey, currentUser);
+        }
       }
       await deleteMenuItemFromFirestore(itemId, currentUser);
     });
@@ -1100,6 +1107,7 @@ export function AdminDashboard({
                         <DishEditorCard
                           key={item.id}
                           item={item}
+                          customImages={customImages}
                           previewThumb={previewThumb}
                           hasCustomPhoto={hasCustomPhoto}
                           onSave={(updated) =>
@@ -1113,6 +1121,51 @@ export function AdminDashboard({
                             handleFileUpload(itemSlotKey, file, 800)
                           }
                           onRemoveDishPhoto={() => handleResetMedia(itemSlotKey)}
+                          onUploadOptionPhoto={async (updatedItem, optionId, file) => {
+                            await runMutation(
+                              `Uploading option photo for ${updatedItem.name}...`,
+                              async () => {
+                                await ensureSeededCollections();
+                                const dataUrl = await processImageFile(file, 800, 380000);
+                                await saveSiteMediaToFirestore(
+                                  getOptionMediaSlotKey(updatedItem.id, optionId),
+                                  dataUrl,
+                                  currentUser
+                                );
+                                await upsertMenuItemToFirestore(
+                                  updatedItem,
+                                  originalIndex >= 0 ? originalIndex : 0,
+                                  currentUser
+                                );
+                              }
+                            );
+                          }}
+                          onSaveOptionPhotoUrl={async (updatedItem, optionId, url) => {
+                            const trimmed = url.trim();
+                            if (!trimmed) return;
+                            await runMutation(
+                              `Saving option photo link for ${updatedItem.name}...`,
+                              async () => {
+                                await ensureSeededCollections();
+                                await saveSiteMediaToFirestore(
+                                  getOptionMediaSlotKey(updatedItem.id, optionId),
+                                  trimmed,
+                                  currentUser
+                                );
+                                await upsertMenuItemToFirestore(
+                                  updatedItem,
+                                  originalIndex >= 0 ? originalIndex : 0,
+                                  currentUser
+                                );
+                              }
+                            );
+                          }}
+                          onRemoveOptionPhoto={async (optionId) => {
+                            const slotKey = getOptionMediaSlotKey(item.id, optionId);
+                            if (customImages[slotKey]) {
+                              await handleResetMedia(slotKey);
+                            }
+                          }}
                         />
                       );
                     })}
@@ -2060,30 +2113,98 @@ function ImageSlotCard({
 
 function DishEditorCard({
   item,
+  customImages,
   previewThumb,
   hasCustomPhoto,
   onSave,
   onDelete,
   onUploadDishPhoto,
   onRemoveDishPhoto,
+  onUploadOptionPhoto,
+  onSaveOptionPhotoUrl,
+  onRemoveOptionPhoto,
 }: {
   item: MenuItem;
+  customImages: CustomImagesMap;
   previewThumb?: string;
   hasCustomPhoto: boolean;
   onSave: (updated: MenuItem) => Promise<void>;
   onDelete: () => Promise<void>;
   onUploadDishPhoto: (file: File) => Promise<void>;
   onRemoveDishPhoto: () => Promise<void>;
+  onUploadOptionPhoto: (
+    updatedItem: MenuItem,
+    optionId: string,
+    file: File
+  ) => Promise<void>;
+  onSaveOptionPhotoUrl: (
+    updatedItem: MenuItem,
+    optionId: string,
+    url: string
+  ) => Promise<void>;
+  onRemoveOptionPhoto: (optionId: string) => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<MenuItem>(item);
   const [dirty, setDirty] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showOptions, setShowOptions] = useState((item.options?.length ?? 0) > 0);
+  const [urlBoxOptionId, setUrlBoxOptionId] = useState<string | null>(null);
+  const [optionUrlDraft, setOptionUrlDraft] = useState('');
 
   useEffect(() => {
     setDraft(item);
     setDirty(false);
   }, [item]);
+
+  const options = draft.options ?? [];
+
+  const ensureSafeItemForOptionSave = (base: MenuItem): MenuItem => ({
+    ...base,
+    options: (base.options ?? []).map((opt, idx) => ({
+      ...opt,
+      name: opt.name.trim() || `Option ${idx + 1}`,
+    })),
+  });
+
+  const handleAddOption = () => {
+    const newOpt: MenuItemOption = {
+      id: `opt-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      name: '',
+      priceLkr: draft.priceLkr ?? '',
+      available: true,
+    };
+    setDirty(true);
+    setShowOptions(true);
+    setDraft((prev) => ({
+      ...prev,
+      options: [...(prev.options ?? []), newOpt],
+    }));
+  };
+
+  const handleUpdateOption = (
+    optionId: string,
+    patch: Partial<MenuItemOption>
+  ) => {
+    setDirty(true);
+    setDraft((prev) => ({
+      ...prev,
+      options: (prev.options ?? []).map((opt) =>
+        opt.id === optionId ? { ...opt, ...patch } : opt
+      ),
+    }));
+  };
+
+  const handleRemoveOption = async (optionId: string) => {
+    const nextDraft: MenuItem = {
+      ...draft,
+      options: (draft.options ?? []).filter((opt) => opt.id !== optionId),
+    };
+    setDraft(nextDraft);
+    setDirty(false);
+    await onRemoveOptionPhoto(optionId);
+    await onSave(ensureSafeItemForOptionSave(nextDraft));
+  };
 
   return (
     <div
@@ -2115,6 +2236,7 @@ function DishEditorCard({
             <p className="text-[11px] font-semibold" style={{ color: 'var(--warm-accent)' }}>
               {item.categoryLabel}
               {hasCustomPhoto ? ' · Custom Photo' : ''}
+              {options.length > 0 ? ` · ${options.length} Options` : ''}
             </p>
             <input
               type="text"
@@ -2164,7 +2286,7 @@ function DishEditorCard({
             setDirty(true);
             setDraft((p) => ({ ...p, priceLkr: e.target.value }));
           }}
-          placeholder="Price in LKR (e.g. 950)"
+          placeholder="Base Price in LKR (e.g. 950)"
           aria-label={`Price in LKR for ${item.name}`}
           className="px-3 py-2 min-h-[40px] text-xs font-mono-tabular rounded-xl border"
           style={{
@@ -2187,6 +2309,280 @@ function DishEditorCard({
             borderColor: 'var(--border-color)',
           }}
         />
+      </div>
+
+      {/* Dish Options / Variants Section */}
+      <div
+        className="rounded-xl border p-3 space-y-3"
+        style={{
+          backgroundColor: 'var(--canvas)',
+          borderColor: 'var(--border-color)',
+        }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setShowOptions((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {showOptions ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+            <span>
+              Dish Options / Variants ({options.length})
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleAddOption}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] text-xs font-semibold rounded-lg border cursor-pointer"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--accent)',
+            }}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Option</span>
+          </button>
+        </div>
+
+        {!showOptions && options.length === 0 && (
+          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            Add selectable variations inside this dish (e.g. With Chicken, With Fish, Normal) with separate prices &amp; photos.
+          </p>
+        )}
+
+        {showOptions && (
+          <div className="space-y-2.5">
+            {options.length === 0 ? (
+              <p className="text-xs py-1" style={{ color: 'var(--text-muted)' }}>
+                No options yet. Click &ldquo;Add Option&rdquo; above to add varieties like With Chicken, With Fish, or Normal.
+              </p>
+            ) : (
+              options.map((opt, idx) => {
+                const optSlotKey = getOptionMediaSlotKey(item.id, opt.id);
+                const optCustomSrc = customImages[optSlotKey];
+                const optPreviewSrc = optCustomSrc || previewThumb;
+                const isUrlOpen = urlBoxOptionId === opt.id;
+
+                return (
+                  <div
+                    key={opt.id}
+                    className="p-3 rounded-xl border space-y-2.5"
+                    style={{
+                      backgroundColor: 'var(--surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                        <div
+                          className="w-12 h-11 rounded-lg overflow-hidden border shrink-0"
+                          style={{
+                            backgroundColor: 'var(--surface-muted)',
+                            borderColor: 'var(--border-color)',
+                          }}
+                        >
+                          {optPreviewSrc && (
+                            <ResilientImage
+                              src={optPreviewSrc}
+                              alt={opt.name || `Option ${idx + 1}`}
+                              fallbackLabel={opt.name || 'Option'}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 flex-1 min-w-0">
+                          <input
+                            type="text"
+                            value={opt.name}
+                            onChange={(e) =>
+                              handleUpdateOption(opt.id, { name: e.target.value })
+                            }
+                            placeholder="Option (e.g. With Chicken)"
+                            aria-label={`Option ${idx + 1} name`}
+                            className="px-2.5 py-1.5 min-h-[38px] text-xs font-medium rounded-lg border"
+                            style={{
+                              backgroundColor: 'var(--canvas)',
+                              borderColor: 'var(--border-color)',
+                            }}
+                          />
+                          <input
+                            type="text"
+                            value={opt.sinhalaName ?? ''}
+                            onChange={(e) =>
+                              handleUpdateOption(opt.id, { sinhalaName: e.target.value })
+                            }
+                            placeholder="Sinhala name (optional)"
+                            aria-label={`Option ${idx + 1} Sinhala name`}
+                            className="px-2.5 py-1.5 min-h-[38px] text-xs rounded-lg border"
+                            style={{
+                              backgroundColor: 'var(--canvas)',
+                              borderColor: 'var(--border-color)',
+                            }}
+                          />
+                          <input
+                            type="text"
+                            value={opt.priceLkr ?? ''}
+                            onChange={(e) =>
+                              handleUpdateOption(opt.id, { priceLkr: e.target.value })
+                            }
+                            placeholder="Price LKR (e.g. 650)"
+                            aria-label={`Option ${idx + 1} price in LKR`}
+                            className="px-2.5 py-1.5 min-h-[38px] text-xs font-mono-tabular rounded-lg border"
+                            style={{
+                              backgroundColor: 'var(--canvas)',
+                              borderColor: 'var(--border-color)',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleUpdateOption(opt.id, {
+                              available: opt.available === false,
+                            })
+                          }
+                          aria-label={
+                            opt.available === false
+                              ? `Show option ${opt.name}`
+                              : `Hide option ${opt.name}`
+                          }
+                          className="p-2 min-w-[36px] min-h-[36px] inline-flex items-center justify-center rounded-lg cursor-pointer"
+                          style={{ backgroundColor: 'var(--surface-muted)' }}
+                        >
+                          {opt.available === false ? (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveOption(opt.id)}
+                          aria-label={`Remove option ${opt.name || idx + 1}`}
+                          className="p-2 min-w-[36px] min-h-[36px] inline-flex items-center justify-center rounded-lg text-[#9B2C2C] bg-[#FEF2F2] cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] text-[11px] font-medium rounded-lg border cursor-pointer"
+                        style={{
+                          backgroundColor: 'var(--surface-muted)',
+                          borderColor: 'var(--border-color)',
+                        }}
+                      >
+                        <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                        <span>{optCustomSrc ? 'Change Option Photo' : 'Upload Option Photo'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const safeItem = ensureSafeItemForOptionSave(draft);
+                              setDraft(safeItem);
+                              setDirty(false);
+                              void onUploadOptionPhoto(safeItem, opt.id, file);
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isUrlOpen) {
+                            setUrlBoxOptionId(null);
+                            setOptionUrlDraft('');
+                          } else {
+                            setUrlBoxOptionId(opt.id);
+                            setOptionUrlDraft(
+                              optCustomSrc && !optCustomSrc.startsWith('data:')
+                                ? optCustomSrc
+                                : ''
+                            );
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] text-[11px] font-medium rounded-lg border cursor-pointer"
+                        style={{
+                          backgroundColor: 'var(--surface-muted)',
+                          borderColor: 'var(--border-color)',
+                        }}
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>Paste Photo URL</span>
+                      </button>
+
+                      {optCustomSrc && (
+                        <button
+                          type="button"
+                          onClick={() => void onRemoveOptionPhoto(opt.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] text-[11px] font-medium text-[#9B2C2C] bg-[#FEF2F2] rounded-lg cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Remove Photo</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {isUrlOpen && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="url"
+                          value={optionUrlDraft}
+                          onChange={(e) => setOptionUrlDraft(e.target.value)}
+                          placeholder="https://example.com/option-photo.jpg"
+                          className="flex-1 px-3 py-1.5 min-h-[36px] text-xs rounded-lg border"
+                          style={{
+                            backgroundColor: 'var(--canvas)',
+                            borderColor: 'var(--border-color)',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (optionUrlDraft.trim()) {
+                              const safeItem = ensureSafeItemForOptionSave(draft);
+                              setDraft(safeItem);
+                              setDirty(false);
+                              void onSaveOptionPhotoUrl(
+                                safeItem,
+                                opt.id,
+                                optionUrlDraft
+                              );
+                              setUrlBoxOptionId(null);
+                              setOptionUrlDraft('');
+                            }
+                          }}
+                          className="px-3 py-1.5 min-h-[36px] text-xs font-semibold text-white rounded-lg cursor-pointer"
+                          style={{ backgroundColor: 'var(--accent)' }}
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
@@ -2215,7 +2611,7 @@ function DishEditorCard({
             }}
           >
             <ImagePlus className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-            <span>{hasCustomPhoto ? 'Change Photo' : 'Upload Photo'}</span>
+            <span>{hasCustomPhoto ? 'Change Dish Photo' : 'Upload Dish Photo'}</span>
           </button>
 
           {hasCustomPhoto && (
@@ -2234,7 +2630,12 @@ function DishEditorCard({
           {dirty && (
             <button
               type="button"
-              onClick={() => void onSave(draft)}
+              onClick={() => {
+                const safeItem = ensureSafeItemForOptionSave(draft);
+                setDraft(safeItem);
+                setDirty(false);
+                void onSave(safeItem);
+              }}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 min-h-[38px] text-xs font-semibold text-white rounded-lg cursor-pointer"
               style={{ backgroundColor: 'var(--accent)' }}
             >

@@ -1,11 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, LayoutGrid, List, Minus, Plus, Search, SquareStack, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  LayoutGrid,
+  List,
+  Minus,
+  Plus,
+  Search,
+  SquareStack,
+  X,
+} from 'lucide-react';
 import {
   CATEGORY_IMAGE_MAP,
   MENU_CATEGORIES,
   MENU_PILLARS,
   MenuCategoryId,
   MenuItem,
+  MenuItemOption,
+  getOptionMediaSlotKey,
+  getTrayItemKey,
 } from '../data/cafeData';
 import { CustomImagesMap, MenuViewMode } from '../types/siteConfig';
 import { ResilientImage } from './ResilientImage';
@@ -18,9 +32,54 @@ interface MenuSectionProps {
   externalCategorySelection?: { category: MenuCategoryId; seq: number } | null;
   onChangeViewMode: (mode: MenuViewMode) => void;
   trayQuantities: Record<string, number>;
-  onAddItem: (item: MenuItem) => void;
-  onDecrementItem: (itemId: string) => void;
+  onAddItem: (item: MenuItem, option?: MenuItemOption) => void;
+  onDecrementItem: (trayKey: string) => void;
   onBackToHome?: () => void;
+}
+
+function getAvailableOptions(item: MenuItem): MenuItemOption[] {
+  return (item.options ?? []).filter((opt) => opt.available !== false);
+}
+
+function getPriceSummary(item: MenuItem, options: MenuItemOption[]): string | undefined {
+  if (options.length === 0) {
+    return item.priceLkr ? `LKR ${item.priceLkr}` : undefined;
+  }
+
+  const prices = options
+    .map((opt) => opt.priceLkr?.trim())
+    .filter((p): p is string => Boolean(p));
+
+  if (prices.length === 0) {
+    return item.priceLkr ? `LKR ${item.priceLkr}` : undefined;
+  }
+
+  const numericPrices = prices
+    .map((p) => Number(p.replace(/[^0-9.]/g, '')))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (numericPrices.length > 0) {
+    const min = Math.min(...numericPrices);
+    const max = Math.max(...numericPrices);
+    if (min === max) {
+      return `LKR ${min.toLocaleString()}`;
+    }
+    return `From LKR ${min.toLocaleString()}`;
+  }
+
+  return `LKR ${prices[0]}`;
+}
+
+function getDishTotalTrayQty(
+  item: MenuItem,
+  options: MenuItemOption[],
+  trayQuantities: Record<string, number>
+): number {
+  let total = trayQuantities[item.id] ?? 0;
+  for (const opt of options) {
+    total += trayQuantities[getTrayItemKey(item.id, opt.id)] ?? 0;
+  }
+  return total;
 }
 
 export function MenuSection({
@@ -38,6 +97,7 @@ export function MenuSection({
   const [activeCategory, setActiveCategory] = useState<'all' | MenuCategoryId>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [vegOnly, setVegOnly] = useState(false);
+  const [selectedDishId, setSelectedDishId] = useState<string | null>(null);
   const ledgerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,6 +110,11 @@ export function MenuSection({
   const activeItems = useMemo(
     () => items.filter((item) => item.available !== false),
     [items]
+  );
+
+  const selectedDish = useMemo(
+    () => activeItems.find((item) => item.id === selectedDishId) ?? null,
+    [activeItems, selectedDishId]
   );
 
   const categoryCounts = useMemo(() => {
@@ -70,7 +135,11 @@ export function MenuSection({
         return false;
       }
       if (query) {
-        const haystack = `${item.name} ${item.sinhalaName ?? ''} ${item.categoryLabel} ${item.note}`.toLowerCase();
+        const optionText = getAvailableOptions(item)
+          .map((opt) => `${opt.name} ${opt.sinhalaName ?? ''}`)
+          .join(' ');
+        const haystack =
+          `${item.name} ${item.sinhalaName ?? ''} ${item.categoryLabel} ${item.note} ${optionText}`.toLowerCase();
         return haystack.includes(query);
       }
       return true;
@@ -408,7 +477,11 @@ export function MenuSection({
               }}
             >
               {filteredItems.map((item, idx) => {
-                const qty = trayQuantities[item.id] ?? 0;
+                const options = getAvailableOptions(item);
+                const hasOptions = options.length > 0;
+                const qty = getDishTotalTrayQty(item, options, trayQuantities);
+                const priceSummary = getPriceSummary(item, options);
+
                 return (
                   <article
                     key={item.id}
@@ -417,7 +490,18 @@ export function MenuSection({
                     }`}
                     style={{ borderColor: 'var(--border-color)' }}
                   >
-                    <div className="min-w-0">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedDishId(item.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedDishId(item.id);
+                        }
+                      }}
+                      className="min-w-0 flex-1 cursor-pointer group"
+                    >
                       <div
                         className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs mb-0.5"
                         style={{ color: 'var(--text-muted)' }}
@@ -436,7 +520,7 @@ export function MenuSection({
                       </div>
                       <div className="flex flex-wrap items-baseline gap-2">
                         <h3
-                          className="font-display text-base font-medium"
+                          className="font-display text-base font-medium group-hover:underline"
                           style={{ color: 'var(--text-primary)' }}
                         >
                           {item.name}
@@ -446,23 +530,43 @@ export function MenuSection({
                             {item.sinhalaName}
                           </span>
                         )}
-                        {item.priceLkr && (
+                        {priceSummary && (
                           <span
                             className="text-xs font-mono-tabular font-medium"
                             style={{ color: 'var(--accent)' }}
                           >
-                            LKR {item.priceLkr}
+                            {priceSummary}
                           </span>
                         )}
                       </div>
+                      {hasOptions && (
+                        <p className="text-xs mt-1 truncate" style={{ color: 'var(--text-secondary)' }}>
+                          {options.length} options: {options.map((o) => o.name).join(' · ')}
+                        </p>
+                      )}
                     </div>
 
-                    <ItemStepper
-                      item={item}
-                      qty={qty}
-                      onAdd={() => onAddItem(item)}
-                      onDecrement={() => onDecrementItem(item.id)}
-                    />
+                    {hasOptions ? (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDishId(item.id)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        style={{
+                          backgroundColor: qty > 0 ? 'var(--accent)' : 'var(--surface-muted)',
+                          color: qty > 0 ? '#FFFFFF' : 'var(--accent)',
+                        }}
+                      >
+                        <span>{qty > 0 ? `${qty} in Tray` : 'Select Option'}</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <ItemStepper
+                        item={item}
+                        qty={qty}
+                        onAdd={() => onAddItem(item)}
+                        onDecrement={() => onDecrementItem(item.id)}
+                      />
+                    )}
                   </article>
                 );
               })}
@@ -471,7 +575,10 @@ export function MenuSection({
             /* Photo Cards or Clean Grid */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {filteredItems.map((item) => {
-                const qty = trayQuantities[item.id] ?? 0;
+                const options = getAvailableOptions(item);
+                const hasOptions = options.length > 0;
+                const qty = getDishTotalTrayQty(item, options, trayQuantities);
+                const priceSummary = getPriceSummary(item, options);
                 const defaultCatImg = CATEGORY_IMAGE_MAP[item.category];
                 const resolvedImgSrc =
                   customImages[`item:${item.id}`] ||
@@ -488,17 +595,31 @@ export function MenuSection({
                     }}
                   >
                     {viewMode === 'gallery' && resolvedImgSrc && (
-                      <div
-                        className="aspect-[16/9] w-full overflow-hidden"
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDishId(item.id)}
+                        className="aspect-[16/9] w-full overflow-hidden block cursor-pointer group relative text-left"
                         style={{ backgroundColor: 'var(--surface-muted)' }}
+                        aria-label={`View details and options for ${item.name}`}
                       >
                         <ResilientImage
                           src={resolvedImgSrc}
                           alt={`${item.name} — ${defaultCatImg?.alt ?? item.categoryLabel}`}
                           fallbackLabel={item.name}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                         />
-                      </div>
+                        {hasOptions && (
+                          <span
+                            className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-md text-[11px] font-semibold backdrop-blur-sm"
+                            style={{
+                              backgroundColor: 'rgba(24, 16, 10, 0.78)',
+                              color: '#FAF4E8',
+                            }}
+                          >
+                            {options.length} Options
+                          </span>
+                        )}
+                      </button>
                     )}
 
                     <div className="p-5 flex-1 flex flex-col justify-between gap-4">
@@ -520,22 +641,26 @@ export function MenuSection({
                           )}
                         </div>
 
-                        <div className="flex items-baseline justify-between gap-3 mb-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDishId(item.id)}
+                          className="w-full flex items-baseline justify-between gap-3 mb-1 text-left cursor-pointer group"
+                        >
                           <h3
-                            className="font-display text-lg font-medium"
+                            className="font-display text-lg font-medium group-hover:underline"
                             style={{ color: 'var(--text-primary)' }}
                           >
                             {item.name}
                           </h3>
-                          {item.priceLkr && (
+                          {priceSummary && (
                             <span
                               className="text-sm font-mono-tabular font-medium shrink-0"
                               style={{ color: 'var(--accent)' }}
                             >
-                              LKR {item.priceLkr}
+                              {priceSummary}
                             </span>
                           )}
-                        </div>
+                        </button>
 
                         {showSinhalaSubtitles && item.sinhalaName && (
                           <p
@@ -552,21 +677,49 @@ export function MenuSection({
                         >
                           {item.note}
                         </p>
+
+                        {hasOptions && (
+                          <div
+                            className="mt-3 pt-2.5 border-t flex flex-wrap items-center gap-1.5 text-xs"
+                            style={{ borderColor: 'var(--surface-muted)' }}
+                          >
+                            <span style={{ color: 'var(--text-muted)' }}>Options:</span>
+                            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                              {options.map((opt) => opt.name).join(' · ')}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <div
-                        className="flex items-center justify-between pt-3 border-t"
+                        className="flex items-center justify-between pt-3 border-t gap-3"
                         style={{ borderColor: 'var(--surface-muted)' }}
                       >
                         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          Prepared fresh on order
+                          {hasOptions ? 'Click to choose style' : 'Prepared fresh on order'}
                         </span>
-                        <ItemStepper
-                          item={item}
-                          qty={qty}
-                          onAdd={() => onAddItem(item)}
-                          onDecrement={() => onDecrementItem(item.id)}
-                        />
+
+                        {hasOptions ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDishId(item.id)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                            style={{
+                              backgroundColor: qty > 0 ? 'var(--accent)' : 'var(--surface-muted)',
+                              color: qty > 0 ? '#FFFFFF' : 'var(--accent)',
+                            }}
+                          >
+                            <span>{qty > 0 ? `Choose (${qty} in Tray)` : 'Select Option'}</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <ItemStepper
+                            item={item}
+                            qty={qty}
+                            onAdd={() => onAddItem(item)}
+                            onDecrement={() => onDecrementItem(item.id)}
+                          />
+                        )}
                       </div>
                     </div>
                   </article>
@@ -576,21 +729,368 @@ export function MenuSection({
           )}
         </div>
       </div>
+
+      {selectedDish && (
+        <DishOptionsModal
+          item={selectedDish}
+          customImages={customImages}
+          showSinhalaSubtitles={showSinhalaSubtitles}
+          trayQuantities={trayQuantities}
+          onAddItem={onAddItem}
+          onDecrementItem={onDecrementItem}
+          onClose={() => setSelectedDishId(null)}
+        />
+      )}
     </section>
+  );
+}
+
+function DishOptionsModal({
+  item,
+  customImages,
+  showSinhalaSubtitles,
+  trayQuantities,
+  onAddItem,
+  onDecrementItem,
+  onClose,
+}: {
+  item: MenuItem;
+  customImages: CustomImagesMap;
+  showSinhalaSubtitles: boolean;
+  trayQuantities: Record<string, number>;
+  onAddItem: (item: MenuItem, option?: MenuItemOption) => void;
+  onDecrementItem: (trayKey: string) => void;
+  onClose: () => void;
+}) {
+  const options = getAvailableOptions(item);
+  const [selectedOptionId, setSelectedOptionId] = useState<string>(
+    options[0]?.id ?? ''
+  );
+
+  useEffect(() => {
+    if (options.length > 0 && !options.some((o) => o.id === selectedOptionId)) {
+      setSelectedOptionId(options[0].id);
+    }
+  }, [options, selectedOptionId]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const activeOption = options.find((o) => o.id === selectedOptionId) ?? options[0];
+  const defaultCatImg = CATEGORY_IMAGE_MAP[item.category];
+  const baseDishImg =
+    customImages[`item:${item.id}`] ||
+    customImages[`cat:${item.category}`] ||
+    defaultCatImg?.image ||
+    '';
+
+  const activeImgSrc = activeOption
+    ? customImages[getOptionMediaSlotKey(item.id, activeOption.id)] || baseDishImg
+    : baseDishImg;
+
+  const activeTrayKey = activeOption
+    ? getTrayItemKey(item.id, activeOption.id)
+    : item.id;
+  const activeQty = trayQuantities[activeTrayKey] ?? 0;
+  const activePrice = activeOption?.priceLkr || item.priceLkr;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/55 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${item.name} options`}
+      onClick={onClose}
+    >
+      <div
+        className="w-full sm:max-w-xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border shadow-2xl flex flex-col"
+        style={{
+          backgroundColor: 'var(--canvas)',
+          borderColor: 'var(--border-color)',
+          color: 'var(--text-primary)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Dynamic Dish / Selected Option Photo Header */}
+        <div
+          className="relative aspect-[16/10] w-full overflow-hidden shrink-0"
+          style={{ backgroundColor: 'var(--surface-muted)' }}
+        >
+          {activeImgSrc && (
+            <ResilientImage
+              src={activeImgSrc}
+              alt={activeOption ? `${item.name} — ${activeOption.name}` : item.name}
+              fallbackLabel={activeOption ? `${item.name} (${activeOption.name})` : item.name}
+              className="w-full h-full object-cover"
+            />
+          )}
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dish details"
+            className="absolute top-3 right-3 w-10 h-10 rounded-full inline-flex items-center justify-center bg-black/60 text-white hover:bg-black/75 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          {activeOption && (
+            <div
+              className="absolute bottom-3 left-3 right-3 px-3.5 py-2 rounded-xl flex items-center justify-between gap-3 backdrop-blur-sm"
+              style={{
+                backgroundColor: 'rgba(24, 16, 10, 0.78)',
+                color: '#FAF4E8',
+              }}
+            >
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-wider opacity-80">
+                  Selected Option
+                </p>
+                <p className="text-sm font-semibold truncate">{activeOption.name}</p>
+              </div>
+              {activePrice && (
+                <p className="text-sm font-mono-tabular font-semibold shrink-0 text-[#F2B449]">
+                  LKR {activePrice}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Dish Body & Option Selector */}
+        <div className="p-5 sm:p-6 space-y-5">
+          <div>
+            <div
+              className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs mb-1"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <span>{item.categoryLabel}</span>
+              <span aria-hidden="true">·</span>
+              <span>{item.styleTag}</span>
+              {item.vegetarian && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-medium" style={{ color: 'var(--accent)' }}>
+                    Veg
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="font-display text-2xl font-medium">{item.name}</h3>
+              {activePrice && (
+                <span
+                  className="text-base font-mono-tabular font-semibold shrink-0"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  LKR {activePrice}
+                </span>
+              )}
+            </div>
+
+            {showSinhalaSubtitles && item.sinhalaName && (
+              <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--warm-accent)' }}>
+                {item.sinhalaName}
+              </p>
+            )}
+
+            <p className="text-sm leading-relaxed mt-2" style={{ color: 'var(--text-secondary)' }}>
+              {item.note}
+            </p>
+          </div>
+
+          {options.length > 0 && (
+            <div className="space-y-2.5">
+              <p className="text-xs font-semibold tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                Choose Your Preference ({options.length})
+              </p>
+
+              <div className="space-y-2">
+                {options.map((option) => {
+                  const isSelected = option.id === activeOption?.id;
+                  const optImgSrc =
+                    customImages[getOptionMediaSlotKey(item.id, option.id)] || baseDishImg;
+                  const optTrayKey = getTrayItemKey(item.id, option.id);
+                  const optQty = trayQuantities[optTrayKey] ?? 0;
+                  const optPrice = option.priceLkr || item.priceLkr;
+
+                  return (
+                    <div
+                      key={option.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedOptionId(option.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedOptionId(option.id);
+                        }
+                      }}
+                      className="p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all"
+                      style={{
+                        backgroundColor: 'var(--surface)',
+                        borderColor: isSelected ? 'var(--accent)' : 'var(--border-color)',
+                        boxShadow: isSelected ? '0 0 0 1px var(--accent)' : 'none',
+                      }}
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div
+                          className="w-14 h-12 rounded-lg overflow-hidden border shrink-0"
+                          style={{
+                            backgroundColor: 'var(--surface-muted)',
+                            borderColor: 'var(--border-color)',
+                          }}
+                        >
+                          {optImgSrc && (
+                            <ResilientImage
+                              src={optImgSrc}
+                              alt={`${item.name} — ${option.name}`}
+                              fallbackLabel={option.name}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-semibold truncate">{option.name}</p>
+                            {isSelected && (
+                              <Check
+                                className="w-4 h-4 shrink-0"
+                                style={{ color: 'var(--accent)' }}
+                              />
+                            )}
+                          </div>
+                          {showSinhalaSubtitles && option.sinhalaName && (
+                            <p className="text-xs truncate" style={{ color: 'var(--warm-accent)' }}>
+                              {option.sinhalaName}
+                            </p>
+                          )}
+                          {optPrice && (
+                            <p
+                              className="text-xs font-mono-tabular font-medium mt-0.5"
+                              style={{ color: 'var(--accent)' }}
+                            >
+                              LKR {optPrice}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div
+                        className="shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ItemStepper
+                          item={item}
+                          optionName={option.name}
+                          qty={optQty}
+                          onAdd={() => {
+                            setSelectedOptionId(option.id);
+                            onAddItem(item, option);
+                          }}
+                          onDecrement={() => onDecrementItem(optTrayKey)}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Modal Action Bar */}
+          <div
+            className="pt-4 border-t flex flex-wrap items-center justify-between gap-3"
+            style={{ borderColor: 'var(--border-color)' }}
+          >
+            {activeOption ? (
+              <div className="flex items-center gap-2 flex-1">
+                {activeQty === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => onAddItem(item, activeOption)}
+                    className="flex-1 py-2.5 px-4 min-h-[44px] inline-flex items-center justify-center gap-2 text-sm font-semibold text-white rounded-xl cursor-pointer"
+                    style={{ backgroundColor: 'var(--accent)' }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>
+                      Add {activeOption.name}
+                      {activePrice ? ` · LKR ${activePrice}` : ''}
+                    </span>
+                  </button>
+                ) : (
+                  <div
+                    className="flex-1 flex items-center justify-between px-3 py-1.5 rounded-xl border"
+                    style={{
+                      backgroundColor: 'var(--surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  >
+                    <span className="text-xs font-medium truncate pr-2">
+                      {activeOption.name} in tray
+                    </span>
+                    <ItemStepper
+                      item={item}
+                      optionName={activeOption.name}
+                      qty={activeQty}
+                      onAdd={() => onAddItem(item, activeOption)}
+                      onDecrement={() => onDecrementItem(activeTrayKey)}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <ItemStepper
+                item={item}
+                qty={activeQty}
+                onAdd={() => onAddItem(item)}
+                onDecrement={() => onDecrementItem(item.id)}
+              />
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl border cursor-pointer"
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: 'var(--border-color)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function ItemStepper({
   item,
+  optionName,
   qty,
   onAdd,
   onDecrement,
 }: {
   item: MenuItem;
+  optionName?: string;
   qty: number;
   onAdd: () => void;
   onDecrement: () => void;
 }) {
+  const fullLabel = optionName ? `${item.name} (${optionName})` : item.name;
+
   if (qty === 0) {
     return (
       <button
@@ -616,7 +1116,7 @@ function ItemStepper({
       <button
         type="button"
         onClick={onDecrement}
-        aria-label={`Remove one ${item.name}`}
+        aria-label={`Remove one ${fullLabel}`}
         className="w-8 h-8 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer"
         style={{
           backgroundColor: 'var(--surface)',
@@ -634,7 +1134,7 @@ function ItemStepper({
       <button
         type="button"
         onClick={onAdd}
-        aria-label={`Add one more ${item.name}`}
+        aria-label={`Add one more ${fullLabel}`}
         className="w-8 h-8 inline-flex items-center justify-center rounded-md text-white transition-colors cursor-pointer"
         style={{ backgroundColor: 'var(--accent)' }}
       >
