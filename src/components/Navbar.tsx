@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, Moon, Sun, X } from 'lucide-react';
 import { SectionId } from '../types/siteConfig';
 
 interface NavbarProps {
   cafeName: string;
   trayCount: number;
   visibleSections: SectionId[];
+  colorMode: 'light' | 'dark';
+  onToggleColorMode: () => void;
   onOpenTray: () => void;
 }
 
@@ -13,6 +15,8 @@ export function Navbar({
   cafeName,
   trayCount,
   visibleSections,
+  colorMode,
+  onToggleColorMode,
   onOpenTray,
 }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -136,8 +140,23 @@ export function Navbar({
           ))}
         </nav>
 
-        {/* Zone 3: 1 primary action + mobile drawer toggle */}
+        {/* Zone 3: Theme toggle + primary action + mobile drawer toggle */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleColorMode}
+            aria-label={colorMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            title={colorMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            className="p-2 min-w-[38px] min-h-[38px] sm:min-w-[40px] sm:min-h-[40px] inline-flex items-center justify-center rounded-full border text-[#FAF4E8] hover:bg-white/10 transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E2A43B]"
+            style={{ borderColor: 'rgba(229, 216, 191, 0.28)' }}
+          >
+            {colorMode === 'dark' ? (
+              <Sun className="w-4 h-4 text-[#F2B449]" />
+            ) : (
+              <Moon className="w-4 h-4" />
+            )}
+          </button>
+
           <button
             type="button"
             onClick={onOpenTray}
@@ -185,6 +204,19 @@ export function Navbar({
               {link.label}
             </a>
           ))}
+
+          <button
+            type="button"
+            onClick={() => {
+              onToggleColorMode();
+              setMobileMenuOpen(false);
+            }}
+            className="mt-1 pt-2.5 pb-2 px-2.5 border-t flex items-center gap-2.5 text-sm font-medium text-[#F2B449] hover:bg-white/5 rounded-md transition-colors cursor-pointer text-left"
+            style={{ borderColor: 'rgba(229, 216, 191, 0.14)' }}
+          >
+            {colorMode === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            <span>{colorMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}</span>
+          </button>
         </nav>
       )}
     </header>

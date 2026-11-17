@@ -21,9 +21,17 @@ export function ResilientImage({
       <div
         role="img"
         aria-label={alt}
-        className={`flex flex-col items-center justify-center bg-[#EFECE4] text-[#4A5853] px-4 py-6 text-center ${className}`}
+        className={`flex flex-col items-center justify-center px-4 py-6 text-center ${className}`}
+        style={{
+          backgroundColor: 'var(--surface-muted)',
+          color: 'var(--text-secondary)',
+        }}
       >
-        <Mountain className="w-7 h-7 mb-2 text-[#0F5C46]" strokeWidth={1.5} />
+        <Mountain
+          className="w-7 h-7 mb-2"
+          strokeWidth={1.5}
+          style={{ color: 'var(--accent)' }}
+        />
         <span className="text-xs font-medium tracking-wide">{fallbackLabel}</span>
       </div>
     );

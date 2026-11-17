@@ -17,6 +17,7 @@ import {
   MENU_ITEMS,
   MenuCategoryId,
   MenuItem,
+  SRI_LANKA_DARK_THEMES,
   SRI_LANKA_THEMES,
 } from './data/cafeData';
 import { auth, isVerifiedOwnerAdmin } from './firebase';
@@ -44,6 +45,7 @@ import { AdminDashboard, AdminTab } from './components/AdminDashboard';
 import { ResilientImage } from './components/ResilientImage';
 
 const TRAY_STORAGE_KEY = 'ella_cloudscape_tray_v1';
+const COLOR_MODE_STORAGE_KEY = 'pahanpiyasa_color_mode_v1';
 
 const DEFAULT_PHOTO_SECTIONS: CustomPhotoSection[] = [
   {
@@ -145,6 +147,23 @@ export default function App() {
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<AdminTab>('photos');
   const ownerTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
+  const [colorMode, setColorMode] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem(COLOR_MODE_STORAGE_KEY);
+      if (saved === 'dark' || saved === 'light') {
+        return saved;
+      }
+      if (
+        typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-color-scheme: dark)').matches
+      ) {
+        return 'dark';
+      }
+    } catch {
+      // Ignore storage read errors
+    }
+    return 'light';
+  });
 
   const isOwnerAdmin = isVerifiedOwnerAdmin(currentUser);
 
@@ -235,10 +254,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [currentUser]);
 
-  // Sync theme palette & typography tokens to :root
+  // Sync theme palette (Light or Dark mode) & typography tokens to :root
   useEffect(() => {
-    const palette = SRI_LANKA_THEMES[config.themeId] ?? SRI_LANKA_THEMES['village-ella'];
+    const paletteSet =
+      colorMode === 'dark' ? SRI_LANKA_DARK_THEMES : SRI_LANKA_THEMES;
+    const palette = paletteSet[config.themeId] ?? paletteSet['village-ella'];
     const root = document.documentElement;
+    root.style.colorScheme = colorMode;
     root.style.setProperty('--canvas', palette.canvas);
     root.style.setProperty('--surface', palette.surface);
     root.style.setProperty('--surface-muted', palette.surfaceMuted);
@@ -254,7 +276,15 @@ export default function App() {
       '--font-display-active',
       config.fontStyle === 'modern' ? 'var(--font-sans)' : 'var(--font-display)'
     );
-  }, [config.themeId, config.fontStyle]);
+  }, [config.themeId, config.fontStyle, colorMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLOR_MODE_STORAGE_KEY, colorMode);
+    } catch {
+      // Ignore storage write errors
+    }
+  }, [colorMode]);
 
   useEffect(() => {
     try {
@@ -411,6 +441,10 @@ export default function App() {
         cafeName={config.cafeName}
         trayCount={totalTrayCount}
         visibleSections={visibleSections}
+        colorMode={colorMode}
+        onToggleColorMode={() =>
+          setColorMode((prev) => (prev === 'dark' ? 'light' : 'dark'))
+        }
         onOpenTray={() => setIsTrayOpen(true)}
       />
 
@@ -550,7 +584,10 @@ export default function App() {
                   }}
                 >
                   <div>
-                    <AyubowanLockup greeting={config.ayubowanGreeting} tone="light" />
+                    <AyubowanLockup
+                      greeting={config.ayubowanGreeting}
+                      tone={colorMode === 'dark' ? 'dark' : 'light'}
+                    />
                     <h1
                       className="font-display text-[clamp(2.45rem,4vw,3.75rem)] leading-[1.08] font-medium tracking-tight mb-4 text-balance"
                       style={{ color: 'var(--text-primary)' }}

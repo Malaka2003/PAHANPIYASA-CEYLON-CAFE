@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { User, signInWithPopup, signOut } from 'firebase/auth';
 import { AlertTriangle, Lock, LogIn, LogOut, ShieldCheck, X } from 'lucide-react';
 import {
-  OWNER_ADMIN_EMAIL,
   auth,
   googleProvider,
   isVerifiedOwnerAdmin,
@@ -154,8 +153,7 @@ export function AdminLoginModal({
                   website content.
                 </p>
                 <p className="text-xs leading-relaxed">
-                  Only the verified owner (<strong>{OWNER_ADMIN_EMAIL}</strong>) may sign
-                  in to manage the website.
+                  Only the verified website owner may sign in to manage website content.
                 </p>
               </div>
 
@@ -232,24 +230,9 @@ export function AdminLoginModal({
                 className="text-sm leading-relaxed"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Sign in with the verified owner Google account to upload photos, update
-                traditional menu prices, and manage website sections. Regular visitors can
-                browse the website in read-only mode.
+                Sign in with your verified owner Google account to manage photos, menu
+                items, prices, and website details.
               </p>
-
-              <div
-                className="p-3.5 rounded-xl border text-xs space-y-1"
-                style={{
-                  backgroundColor: 'var(--surface)',
-                  borderColor: 'var(--border-color)',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  Authorized Owner Account
-                </p>
-                <p className="font-mono-tabular break-all">{OWNER_ADMIN_EMAIL}</p>
-              </div>
 
               {errorMessage && (
                 <div
