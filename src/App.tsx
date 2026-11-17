@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
+import { User, onIdTokenChanged } from 'firebase/auth';
 import {
   ArrowDown,
   MapPin,
@@ -116,8 +116,12 @@ export default function App() {
   const [cloudPhotoSections, setCloudPhotoSections] = useState<CustomPhotoSection[] | null>(null);
   const [customImages, setCustomImages] = useState<CustomImagesMap>({});
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authReady, setAuthReady] = useState(false);
+  const [authState, setAuthState] = useState<{
+    user: User | null;
+    ready: boolean;
+  }>({ user: null, ready: false });
+  const currentUser = authState.user;
+  const authReady = authState.ready;
 
   const [visitorMenuViewOverride, setVisitorMenuViewOverride] =
     useState<MenuViewMode | null>(null);
@@ -188,11 +192,10 @@ export default function App() {
     customPhotoSections: cloudPhotoSections ?? DEFAULT_CONFIG.customPhotoSections,
   };
 
-  // Subscribe to Firebase Auth state
+  // Subscribe to Firebase Auth & ID token state (picks up emailVerified refreshes)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setAuthReady(true);
+    const unsubscribe = onIdTokenChanged(auth, (user) => {
+      setAuthState({ user, ready: true });
       if (isVerifiedOwnerAdmin(user)) {
         void recordAdminLogin(user).catch((err) => {
           console.error('Failed to record admin login:', err);
