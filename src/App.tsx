@@ -26,6 +26,11 @@ import {
   subscribeStorefrontData,
 } from './services/siteFirestore';
 import {
+  checkAdminOtpSession,
+  clearOtpSessionToken,
+  getStoredOtpSessionToken,
+} from './services/adminOtp';
+import {
   CustomImagesMap,
   CustomPhotoSection,
   MenuViewMode,
@@ -120,6 +125,7 @@ export default function App() {
     user: User | null;
     ready: boolean;
   }>({ user: null, ready: false });
+  const [otpVerified, setOtpVerified] = useState(false);
   const currentUser = authState.user;
   const authReady = authState.ready;
 
@@ -169,7 +175,7 @@ export default function App() {
     return 'light';
   });
 
-  const isOwnerAdmin = isVerifiedOwnerAdmin(currentUser);
+  const isOwnerAdmin = isVerifiedOwnerAdmin(currentUser) && otpVerified;
 
   // Compose authoritative storefront configuration (Firestore values override defaults)
   const validCloudOrder = Array.isArray(cloudSettings?.sectionOrder)
@@ -194,17 +200,42 @@ export default function App() {
 
   // Subscribe to Firebase Auth & ID token state (picks up emailVerified refreshes)
   useEffect(() => {
-    const unsubscribe = onIdTokenChanged(auth, (user) => {
-      setAuthState({ user, ready: true });
-      if (isVerifiedOwnerAdmin(user)) {
+    let active = true;
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
+      if (!active) return;
+
+      if (!isVerifiedOwnerAdmin(user)) {
+        clearOtpSessionToken();
+        setOtpVerified(false);
+        setIsDashboardOpen(false);
+        setAuthState({ user, ready: true });
+        return;
+      }
+
+      const storedToken = getStoredOtpSessionToken();
+      let isSessionValid = false;
+      if (storedToken) {
+        isSessionValid = await checkAdminOtpSession(user, storedToken);
+        if (!active) return;
+        if (!isSessionValid) {
+          clearOtpSessionToken();
+        }
+      }
+
+      setOtpVerified(isSessionValid);
+      if (!isSessionValid) {
+        setIsDashboardOpen(false);
+      } else {
         void recordAdminLogin(user).catch((err) => {
           console.error('Failed to record admin login:', err);
         });
-      } else {
-        setIsDashboardOpen(false);
       }
+      setAuthState({ user, ready: true });
     });
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   // Subscribe to live read-only storefront collections from Firestore
@@ -228,7 +259,7 @@ export default function App() {
         new URLSearchParams(window.location.search).get('admin') === '1';
       if (!wantsAdmin) return;
 
-      if (isVerifiedOwnerAdmin(currentUser)) {
+      if (isVerifiedOwnerAdmin(currentUser) && otpVerified) {
         setIsLoginModalOpen(false);
         setIsDashboardOpen(true);
       } else {
@@ -239,14 +270,14 @@ export default function App() {
     checkAdminRoute();
     window.addEventListener('hashchange', checkAdminRoute);
     return () => window.removeEventListener('hashchange', checkAdminRoute);
-  }, [authReady, currentUser]);
+  }, [authReady, currentUser, otpVerified]);
 
   // Keyboard shortcut (Ctrl/Cmd + Shift + A) to open private Owner Login / Admin Dashboard
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        if (isVerifiedOwnerAdmin(currentUser)) {
+        if (isVerifiedOwnerAdmin(currentUser) && otpVerified) {
           setIsDashboardOpen(true);
         } else {
           setIsLoginModalOpen(true);
@@ -255,7 +286,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [currentUser]);
+  }, [currentUser, otpVerified]);
 
   // Sync theme palette (Light or Dark mode) & typography tokens to :root
   useEffect(() => {
@@ -324,7 +355,7 @@ export default function App() {
   };
 
   const openAdminAccess = (tab: AdminTab = 'photos') => {
-    if (isVerifiedOwnerAdmin(currentUser)) {
+    if (isVerifiedOwnerAdmin(currentUser) && otpVerified) {
       setDashboardTab(tab);
       setIsDashboardOpen(true);
     } else {
@@ -829,8 +860,15 @@ export default function App() {
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         currentUser={currentUser}
+        otpVerified={otpVerified}
         cafeName={config.cafeName}
         onAuthenticated={() => {
+          setOtpVerified(true);
+          if (currentUser) {
+            void recordAdminLogin(currentUser).catch((err) => {
+              console.error('Failed to record admin login:', err);
+            });
+          }
           setIsLoginModalOpen(false);
           setIsDashboardOpen(true);
         }}

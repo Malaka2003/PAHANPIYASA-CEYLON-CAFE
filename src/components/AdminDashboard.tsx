@@ -33,6 +33,7 @@ import {
   SRI_LANKA_THEMES,
 } from '../data/cafeData';
 import { auth, isVerifiedOwnerAdmin } from '../firebase';
+import { clearOtpSessionToken } from '../services/adminOtp';
 import {
   deleteMenuItemFromFirestore,
   deletePhotoSectionFromFirestore,
@@ -439,6 +440,7 @@ export function AdminDashboard({
   };
 
   const handleSignOut = async () => {
+    clearOtpSessionToken();
     await signOut(auth);
     onClose();
   };

@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import {
   User,
   sendEmailVerification,
@@ -11,19 +11,28 @@ import {
   AlertTriangle,
   Eye,
   EyeOff,
+  KeyRound,
   Lock,
   LogIn,
   LogOut,
   Mail,
+  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react';
 import { auth, googleProvider, isVerifiedOwnerAdmin } from '../firebase';
+import {
+  OtpServiceError,
+  clearOtpSessionToken,
+  requestAdminEmailOtp,
+  verifyAdminEmailOtp,
+} from '../services/adminOtp';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User | null;
+  otpVerified: boolean;
   cafeName: string;
   onAuthenticated: () => void;
 }
@@ -32,24 +41,81 @@ export function AdminLoginModal({
   isOpen,
   onClose,
   currentUser,
+  otpVerified,
   cafeName,
   onAuthenticated,
 }: AdminLoginModalProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [unauthorizedHost, setUnauthorizedHost] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  const autoRequestedUidRef = useRef<string | null>(null);
 
-  const isOwner = isVerifiedOwnerAdmin(currentUser);
+  const isOwnerFirebase = isVerifiedOwnerAdmin(currentUser);
   const isUnverifiedSignedIn = Boolean(currentUser && !currentUser.emailVerified);
   const isUnauthorizedSignedIn = Boolean(
-    currentUser && currentUser.emailVerified && !isOwner
+    currentUser && currentUser.emailVerified && !isOwnerFirebase
   );
+  const needsEmailOtp = Boolean(isOwnerFirebase && !otpVerified);
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setOtpCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [otpCooldown]);
+
+  const sendEmailOtp = useCallback(async (user: User) => {
+    setErrorMessage(null);
+    setInfoMessage(null);
+    setUnauthorizedHost(null);
+    setIsSubmitting(true);
+    try {
+      const result = await requestAdminEmailOtp(user);
+      setOtpSent(true);
+      setOtpCooldown(result.cooldownSeconds);
+      setInfoMessage(
+        'A 6-digit verification code has been sent to your owner email inbox. It expires in 5 minutes.'
+      );
+    } catch (err: unknown) {
+      if (err instanceof OtpServiceError) {
+        if (err.code === 'COOLDOWN' && err.waitSeconds) {
+          setOtpSent(true);
+          setOtpCooldown(err.waitSeconds);
+          setInfoMessage(err.message);
+        } else {
+          setErrorMessage(err.message);
+        }
+      } else {
+        setErrorMessage('Could not send email verification code. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      autoRequestedUidRef.current = null;
+      return;
+    }
+    if (needsEmailOtp && currentUser && autoRequestedUidRef.current !== currentUser.uid) {
+      autoRequestedUidRef.current = currentUser.uid;
+      void sendEmailOtp(currentUser);
+    }
+  }, [isOpen, needsEmailOtp, currentUser, sendEmailOtp]);
+
+  if (!isOpen) return null;
 
   const handleEmailPasswordLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -66,17 +132,18 @@ export function AdminLoginModal({
     setIsSubmitting(true);
     try {
       const result = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      const signedInEmail = result.user.email;
       if (!result.user.emailVerified) {
         setInfoMessage(
           'Your email is not verified yet. Send a verification email below and confirm the link in your inbox.'
         );
       } else if (isVerifiedOwnerAdmin(result.user)) {
         setPassword('');
-        onAuthenticated();
+        setOtpCode('');
+        autoRequestedUidRef.current = result.user.uid;
+        await sendEmailOtp(result.user);
       } else {
         setErrorMessage(
-          `Access denied for ${signedInEmail || 'this account'}. Only the verified website owner may access admin controls.`
+          'Access denied for this account. Only the verified website owner may access admin controls.'
         );
       }
     } catch (err: unknown) {
@@ -117,7 +184,7 @@ export function AdminLoginModal({
     setInfoMessage(null);
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setErrorMessage('Enter your owner email address first to receive a password link.');
+      setErrorMessage('Enter your email address first to receive a password link.');
       return;
     }
 
@@ -153,12 +220,13 @@ export function AdminLoginModal({
     setIsSubmitting(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const signedInEmail = result.user.email;
       if (isVerifiedOwnerAdmin(result.user)) {
-        onAuthenticated();
+        setOtpCode('');
+        autoRequestedUidRef.current = result.user.uid;
+        await sendEmailOtp(result.user);
       } else {
         setErrorMessage(
-          `Access denied for ${signedInEmail || 'this account'}. Only the verified owner account may access admin controls.`
+          'Access denied for this account. Only the verified owner account may access admin controls.'
         );
       }
     } catch (err: unknown) {
@@ -186,6 +254,32 @@ export function AdminLoginModal({
             : 'Unable to complete sign-in. Please try again.'
         );
       }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    setErrorMessage(null);
+    setInfoMessage(null);
+
+    const cleaned = otpCode.replace(/\D/g, '');
+    if (cleaned.length !== 6) {
+      setErrorMessage('Please enter the 6-digit verification code from your email.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await verifyAdminEmailOtp(currentUser, cleaned);
+      setOtpCode('');
+      onAuthenticated();
+    } catch (err: unknown) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Verification failed. Please try again.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -219,7 +313,8 @@ export function AdminLoginModal({
       const refreshedUser = auth.currentUser;
       const isRefreshedVerified = Boolean(refreshedUser?.emailVerified);
       if (isVerifiedOwnerAdmin(refreshedUser)) {
-        onAuthenticated();
+        autoRequestedUidRef.current = refreshedUser.uid;
+        await sendEmailOtp(refreshedUser);
       } else if (isRefreshedVerified) {
         setErrorMessage(
           'Access denied. Only the verified website owner may manage website content.'
@@ -237,6 +332,11 @@ export function AdminLoginModal({
   const handleSignOut = async () => {
     setErrorMessage(null);
     setInfoMessage(null);
+    setOtpCode('');
+    setOtpSent(false);
+    setOtpCooldown(0);
+    autoRequestedUidRef.current = null;
+    clearOtpSessionToken();
     setIsSubmitting(true);
     try {
       await signOut(auth);
@@ -280,7 +380,7 @@ export function AdminLoginModal({
             </div>
             <div>
               <h2 className="font-display text-lg font-medium leading-tight">
-                Owner Admin Login
+                {needsEmailOtp ? 'Email Verification Code' : 'Owner Admin Login'}
               </h2>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 {cafeName}
@@ -314,9 +414,8 @@ export function AdminLoginModal({
                   <span>Verify Your Email Address</span>
                 </div>
                 <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                  Signed in as <strong>{currentUser?.email}</strong>. To protect database
-                  writes, please verify your email address before opening the Admin
-                  Dashboard.
+                  To protect database writes, please verify your email address before
+                  continuing to the verification code step.
                 </p>
               </div>
 
@@ -389,9 +488,8 @@ export function AdminLoginModal({
                   <span>Access Denied — Unauthorized Account</span>
                 </div>
                 <p className="text-xs leading-relaxed">
-                  Signed in as <strong>{currentUser?.email || 'Guest'}</strong>. This
-                  account does not have permission to edit photos, menu items, prices, or
-                  website content.
+                  This account does not have permission to edit photos, menu items,
+                  prices, or website content.
                 </p>
                 <p className="text-xs leading-relaxed">
                   Only the verified website owner may sign in to manage website content.
@@ -422,7 +520,125 @@ export function AdminLoginModal({
                 </button>
               </div>
             </div>
-          ) : isOwner ? (
+          ) : needsEmailOtp ? (
+            <div className="space-y-4">
+              <div
+                className="p-4 rounded-xl border space-y-1.5"
+                style={{
+                  backgroundColor: 'var(--surface)',
+                  borderColor: 'var(--border-color)',
+                }}
+              >
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <KeyRound className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
+                  <span>Step 2: Enter 6-Digit Email Code</span>
+                </div>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  Enter the 6-digit verification code sent to your owner email inbox to
+                  unlock the Admin Dashboard.
+                </p>
+              </div>
+
+              <form onSubmit={handleVerifyOtp} className="space-y-3.5">
+                <div>
+                  <label
+                    htmlFor="admin-otp-input"
+                    className="block text-xs font-semibold mb-1.5"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    6-Digit Verification Code
+                  </label>
+                  <input
+                    id="admin-otp-input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) =>
+                      setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                    }
+                    placeholder="000000"
+                    className="w-full px-4 py-3 min-h-[52px] text-center text-2xl font-mono-tabular font-semibold tracking-[0.45em] rounded-xl border"
+                    style={{
+                      backgroundColor: 'var(--surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  />
+                </div>
+
+                {infoMessage && (
+                  <p
+                    className="text-xs font-medium rounded-xl px-3.5 py-2.5 border"
+                    style={{
+                      backgroundColor: 'var(--surface)',
+                      borderColor: 'var(--accent)',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    {infoMessage}
+                  </p>
+                )}
+
+                {errorMessage && (
+                  <p
+                    role="alert"
+                    className="text-xs font-medium text-[#9B2C2C] bg-[#FEF2F2] border border-[#FECACA] rounded-xl px-3.5 py-2.5 break-words"
+                  >
+                    {errorMessage}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || otpCode.length !== 6}
+                  className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[46px] text-sm font-semibold text-white rounded-xl transition-opacity hover:opacity-95 cursor-pointer disabled:opacity-60"
+                  style={{ backgroundColor: 'var(--accent)' }}
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>{isSubmitting ? 'Verifying...' : 'Verify & Open Dashboard'}</span>
+                </button>
+              </form>
+
+              <div className="flex items-center justify-between gap-2.5 pt-1">
+                <button
+                  type="button"
+                  disabled={isSubmitting || otpCooldown > 0 || !currentUser}
+                  onClick={() => currentUser && void sendEmailOtp(currentUser)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-medium rounded-xl border cursor-pointer disabled:opacity-60"
+                  style={{
+                    backgroundColor: 'var(--surface)',
+                    borderColor: 'var(--border-color)',
+                  }}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>
+                    {otpCooldown > 0
+                      ? `Resend in ${otpCooldown}s`
+                      : otpSent
+                        ? 'Resend Code'
+                        : 'Send Code'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleSignOut}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-medium rounded-xl border cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--surface-muted)',
+                    borderColor: 'var(--border-color)',
+                  }}
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          ) : isOwnerFirebase && otpVerified ? (
             <div className="space-y-4">
               <div
                 className="p-4 rounded-xl border space-y-1.5"
@@ -439,7 +655,7 @@ export function AdminLoginModal({
                   <span>Verified Owner Authenticated</span>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  Signed in as <strong>{currentUser?.email}</strong>.
+                  Your password and email verification code are confirmed.
                 </p>
               </div>
 
@@ -471,8 +687,8 @@ export function AdminLoginModal({
                 className="text-sm leading-relaxed"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Sign in with your verified owner account to manage photos, menu items,
-                prices, and website details.
+                Sign in with your owner account, then enter the 6-digit verification code
+                sent to your email.
               </p>
 
               <form onSubmit={handleEmailPasswordLogin} className="space-y-3">
@@ -594,7 +810,7 @@ export function AdminLoginModal({
                   style={{ backgroundColor: 'var(--accent)' }}
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>{isSubmitting ? 'Signing in...' : 'Sign In with Password'}</span>
+                  <span>{isSubmitting ? 'Signing in...' : 'Sign In & Send Code'}</span>
                 </button>
               </form>
 
