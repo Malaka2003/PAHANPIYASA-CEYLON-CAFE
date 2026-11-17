@@ -50,6 +50,7 @@ import { OrderTrayDrawer } from './components/OrderTrayDrawer';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminDashboard, AdminTab } from './components/AdminDashboard';
 import { ResilientImage } from './components/ResilientImage';
+import { resolveAssetUrl } from './utils/assetUrl';
 
 function isMenuHash(hash: string): boolean {
   const normalized = hash.toLowerCase();
@@ -1032,6 +1033,7 @@ function AyubowanLockup({
   tone: 'dark' | 'light';
   centered?: boolean;
 }) {
+  const [imgError, setImgError] = useState(false);
   const rest = greeting
     .replace('ආයුබෝවන්', '')
     .replace(/^\s*[·—-]\s*/, '')
@@ -1043,19 +1045,29 @@ function AyubowanLockup({
         centered ? 'text-center flex flex-col items-center' : ''
       }`}
     >
-      <span
-        className={`inline-block ${
-          tone === 'dark' ? 'ayubowan-blend-dark' : 'ayubowan-blend-light'
-        }`}
-      >
-        <img
-          src="/assets/aistudio/image_383d3ee2.png"
-          alt="ආයුබෝවන්"
-          className={`h-16 sm:h-20 md:h-24 max-w-full w-auto object-contain select-none ${
-            centered ? 'mx-auto' : ''
-          } ${tone === 'dark' ? 'ayubowan-tint-dark' : 'ayubowan-tint-light'}`}
-        />
-      </span>
+      {imgError ? (
+        <span
+          className="font-display text-3xl sm:text-4xl font-semibold tracking-wide select-none"
+          style={{ color: tone === 'dark' ? '#F2B449' : 'var(--warm-accent)' }}
+        >
+          ආයුබෝවන්
+        </span>
+      ) : (
+        <span
+          className={`inline-block ${
+            tone === 'dark' ? 'ayubowan-blend-dark' : 'ayubowan-blend-light'
+          }`}
+        >
+          <img
+            src={resolveAssetUrl('/assets/aistudio/image_383d3ee2.png')}
+            alt="ආයුබෝවන්"
+            onError={() => setImgError(true)}
+            className={`h-16 sm:h-20 md:h-24 max-w-full w-auto object-contain select-none ${
+              centered ? 'mx-auto' : ''
+            } ${tone === 'dark' ? 'ayubowan-tint-dark' : 'ayubowan-tint-light'}`}
+          />
+        </span>
+      )}
       {rest && (
         <p
           className="text-sm sm:text-base font-medium tracking-wide"

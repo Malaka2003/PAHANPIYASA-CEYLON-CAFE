@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Mountain } from 'lucide-react';
+import { resolveAssetUrl } from '../utils/assetUrl';
 
 interface ResilientImageProps {
   src: string;
@@ -14,7 +15,12 @@ export function ResilientImage({
   className = '',
   fallbackLabel = 'PAHANPIYASA CEYLON CAFÉ',
 }: ResilientImageProps) {
+  const resolvedSrc = resolveAssetUrl(src);
   const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [resolvedSrc]);
 
   if (hasError) {
     return (
@@ -39,7 +45,7 @@ export function ResilientImage({
 
   return (
     <img
-      src={src}
+      src={resolvedSrc}
       alt={alt}
       referrerPolicy="no-referrer"
       onError={() => setHasError(true)}
