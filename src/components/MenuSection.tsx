@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutGrid, List, Minus, Plus, Search, SquareStack, X } from 'lucide-react';
+import { ArrowLeft, LayoutGrid, List, Minus, Plus, Search, SquareStack, X } from 'lucide-react';
 import {
   CATEGORY_IMAGE_MAP,
   MENU_CATEGORIES,
@@ -20,6 +20,7 @@ interface MenuSectionProps {
   trayQuantities: Record<string, number>;
   onAddItem: (item: MenuItem) => void;
   onDecrementItem: (itemId: string) => void;
+  onBackToHome?: () => void;
 }
 
 export function MenuSection({
@@ -32,6 +33,7 @@ export function MenuSection({
   trayQuantities,
   onAddItem,
   onDecrementItem,
+  onBackToHome,
 }: MenuSectionProps) {
   const [activeCategory, setActiveCategory] = useState<'all' | MenuCategoryId>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -93,6 +95,24 @@ export function MenuSection({
       style={{ borderColor: 'var(--border-color)' }}
     >
       <div className="max-w-[1240px] mx-auto px-5 sm:px-8">
+        {onBackToHome && (
+          <div className="mb-6">
+            <button
+              type="button"
+              onClick={onBackToHome}
+              className="inline-flex items-center gap-2 px-4 py-2 min-h-[40px] text-xs font-semibold rounded-full border transition-colors cursor-pointer"
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: 'var(--border-color)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Home</span>
+            </button>
+          </div>
+        )}
+
         {/* Section header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div className="max-w-2xl">

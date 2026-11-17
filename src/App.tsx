@@ -37,7 +37,7 @@ import {
   SectionId,
   SiteConfig,
 } from './types/siteConfig';
-import { Navbar, PageTabId } from './components/Navbar';
+import { Navbar, StorefrontView } from './components/Navbar';
 import { StoryMenuBand } from './components/StoryMenuBand';
 import { MenuSection } from './components/MenuSection';
 import { CustomPhotoSections } from './components/CustomPhotoSections';
@@ -49,34 +49,10 @@ import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminDashboard, AdminTab } from './components/AdminDashboard';
 import { ResilientImage } from './components/ResilientImage';
 
-function resolveTabFromHash(hash: string): PageTabId | null {
-  switch (hash.toLowerCase()) {
-    case '#home':
-      return 'home';
-    case '#our-story':
-    case '#sri-lankan-experience':
-      return 'our-story';
-    case '#traditional-menu':
-    case '#menu':
-      return 'menu';
-    case '#gallery':
-      return 'gallery';
-    case '#reservations':
-    case '#contact':
-    case '#visit-us':
-      return 'reservations';
-    default:
-      return null;
-  }
+function isMenuHash(hash: string): boolean {
+  const normalized = hash.toLowerCase();
+  return normalized === '#traditional-menu' || normalized === '#menu';
 }
-
-const TAB_TO_HASH: Record<PageTabId, string> = {
-  home: '#home',
-  'our-story': '#our-story',
-  menu: '#traditional-menu',
-  gallery: '#gallery',
-  reservations: '#reservations',
-};
 
 const TRAY_STORAGE_KEY = 'ella_cloudscape_tray_v1';
 const COLOR_MODE_STORAGE_KEY = 'pahanpiyasa_color_mode_v1';
@@ -203,11 +179,11 @@ export default function App() {
     }
     return 'light';
   });
-  const [activeTab, setActiveTab] = useState<PageTabId>(() => {
-    if (typeof window !== 'undefined') {
-      return resolveTabFromHash(window.location.hash) ?? 'home';
+  const [activeView, setActiveView] = useState<StorefrontView>(() => {
+    if (typeof window !== 'undefined' && isMenuHash(window.location.hash)) {
+      return 'menu';
     }
-    return 'home';
+    return 'main';
   });
 
   const isOwnerAdmin = isVerifiedOwnerAdmin(currentUser) && otpVerified;
@@ -284,12 +260,14 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Open owner login / dashboard when visiting /#admin or ?admin=1, and sync section hashes to tabs
+  // Sync #traditional-menu hash with menu tab view and other section hashes with main page
   useEffect(() => {
     const syncFromHash = () => {
-      const matchedTab = resolveTabFromHash(window.location.hash);
-      if (matchedTab) {
-        setActiveTab(matchedTab);
+      const hash = window.location.hash;
+      if (isMenuHash(hash)) {
+        setActiveView('menu');
+      } else if (hash && hash !== '#admin') {
+        setActiveView('main');
       }
     };
     syncFromHash();
@@ -427,17 +405,42 @@ export default function App() {
     }
   };
 
-  const handleSelectTab = (tab: PageTabId, preserveMenuFilter = false) => {
-    if (!preserveMenuFilter) {
+  const handleOpenMenuTab = (preserveFilter = false) => {
+    if (!preserveFilter) {
       setExternalCategorySelection(null);
     }
-    setActiveTab(tab);
+    setActiveView('menu');
     if (typeof window !== 'undefined') {
-      const targetHash = TAB_TO_HASH[tab];
-      if (window.location.hash !== targetHash && window.location.hash !== '#admin') {
-        window.history.replaceState(null, '', targetHash);
+      if (window.location.hash !== '#traditional-menu' && window.location.hash !== '#admin') {
+        window.history.replaceState(null, '', '#traditional-menu');
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleNavigateMain = (hash: string) => {
+    setExternalCategorySelection(null);
+    const wasMenu = activeView === 'menu';
+    setActiveView('main');
+    if (typeof window !== 'undefined') {
+      if (window.location.hash !== hash && window.location.hash !== '#admin') {
+        window.history.replaceState(null, '', hash);
+      }
+      const scrollToTarget = () => {
+        if (!hash || hash === '#home') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+        const el = document.getElementById(hash.replace(/^#/, ''));
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      };
+      if (wasMenu) {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToTarget));
+      } else {
+        scrollToTarget();
+      }
     }
   };
 
@@ -446,7 +449,7 @@ export default function App() {
       category,
       seq: (prev?.seq ?? 0) + 1,
     }));
-    handleSelectTab('menu', true);
+    handleOpenMenuTab(true);
   };
 
   const totalTrayCount = Object.values(trayQuantities).reduce((sum, count) => sum + count, 0);
@@ -457,19 +460,64 @@ export default function App() {
     (id) => !config.hiddenSections.includes(id)
   );
   const hasMenuTab = visibleSections.includes('menu');
-  const hasGalleryTab = visibleSections.includes('gallery');
-  const hasReservationsTab =
-    visibleSections.includes('contact') || visibleSections.includes('visit-us');
-
-  const resolvedActiveTab: PageTabId =
-    (activeTab === 'menu' && !hasMenuTab) ||
-    (activeTab === 'gallery' && !hasGalleryTab) ||
-    (activeTab === 'reservations' && !hasReservationsTab)
-      ? 'home'
-      : activeTab;
+  const resolvedActiveView: StorefrontView =
+    activeView === 'menu' && hasMenuTab ? 'menu' : 'main';
 
   const heroImageSrc = customImages.hero || CAFE_INFO.heroImage;
   const activeMenuViewMode = visitorMenuViewOverride ?? config.menuViewMode;
+
+  const renderMainSection = (sectionId: SectionId) => {
+    if (sectionId === 'menu') {
+      return null;
+    }
+
+    if (sectionId === 'gallery') {
+      return (
+        <CustomPhotoSections
+          key="gallery"
+          sections={config.customPhotoSections}
+          customImages={customImages}
+          canEdit={isOwnerAdmin}
+          onEditSections={
+            isOwnerAdmin ? () => openAdminAccess('photos') : undefined
+          }
+        />
+      );
+    }
+
+    if (sectionId === 'experience') {
+      return (
+        <SriLankanExperienceSection
+          key="experience"
+          bridgeImageSrc={customImages.bridge}
+        />
+      );
+    }
+
+    if (sectionId === 'visit-us') {
+      return (
+        <VisitUsSection
+          key="visit-us"
+          cafeName={config.cafeName}
+          locationLabel={config.locationLabel}
+          openingHours={config.openingHours}
+          phoneDisplay={config.phoneDisplay}
+          whatsappNumber={config.whatsappNumber}
+        />
+      );
+    }
+
+    return (
+      <ContactSection
+        key="contact"
+        cafeName={config.cafeName}
+        locationLabel={config.locationLabel}
+        phoneDisplay={config.phoneDisplay}
+        whatsappNumber={config.whatsappNumber}
+        email={config.email}
+      />
+    );
+  };
 
   return (
     <div
@@ -483,8 +531,9 @@ export default function App() {
         cafeName={config.cafeName}
         trayCount={totalTrayCount}
         visibleSections={visibleSections}
-        activeTab={resolvedActiveTab}
-        onSelectTab={(tab) => handleSelectTab(tab)}
+        activeView={resolvedActiveView}
+        onNavigateMain={handleNavigateMain}
+        onOpenMenuTab={() => handleOpenMenuTab(false)}
         colorMode={colorMode}
         onToggleColorMode={() =>
           setColorMode((prev) => (prev === 'dark' ? 'light' : 'dark'))
@@ -493,9 +542,22 @@ export default function App() {
       />
 
       <main className="flex-1 overflow-x-clip">
-        {/* TAB 01: Home (Hero + Quick Café Info Strip) */}
-        {resolvedActiveTab === 'home' && (
+        {resolvedActiveView === 'menu' && hasMenuTab ? (
+          <MenuSection
+            items={config.customMenuItems}
+            customImages={customImages}
+            viewMode={activeMenuViewMode}
+            showSinhalaSubtitles={config.showSinhalaSubtitles}
+            externalCategorySelection={externalCategorySelection}
+            onChangeViewMode={(mode) => setVisitorMenuViewOverride(mode)}
+            trayQuantities={trayQuantities}
+            onAddItem={handleAddItem}
+            onDecrementItem={handleDecrementItem}
+            onBackToHome={() => handleNavigateMain('#home')}
+          />
+        ) : (
           <>
+            {/* 01. Home (Hero Terrace Section) */}
             <section id="home" className="relative scroll-mt-16">
               {config.heroLayout === 'panoramic' ? (
                 <div className="relative overflow-hidden bg-[#23160D]">
@@ -574,7 +636,7 @@ export default function App() {
                           {hasMenuTab && (
                             <button
                               type="button"
-                              onClick={() => handleSelectTab('menu')}
+                              onClick={() => handleOpenMenuTab(false)}
                               className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-semibold rounded-full transition-transform hover:-translate-y-0.5 whitespace-nowrap shrink-0 cursor-pointer"
                               style={{
                                 backgroundColor: '#E2A43B',
@@ -586,16 +648,13 @@ export default function App() {
                             </button>
                           )}
 
-                          {hasReservationsTab && (
-                            <button
-                              type="button"
-                              onClick={() => handleSelectTab('reservations')}
-                              className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-medium text-[#FAF4E8] border border-[#FAF4E8]/60 hover:bg-white/10 rounded-full transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                            >
-                              <MapPin className="w-4 h-4" />
-                              <span>Visit Us &amp; Reserve</span>
-                            </button>
-                          )}
+                          <a
+                            href="#visit-us"
+                            className="inline-flex items-center gap-2 px-6 py-3 min-h-[46px] text-sm sm:text-base font-medium text-[#FAF4E8] border border-[#FAF4E8]/60 hover:bg-white/10 rounded-full transition-colors whitespace-nowrap shrink-0"
+                          >
+                            <MapPin className="w-4 h-4" />
+                            <span>Visit Us</span>
+                          </a>
                         </div>
                       </div>
                     </div>
@@ -615,14 +674,13 @@ export default function App() {
                         fill="var(--canvas)"
                       />
                     </svg>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectTab('our-story')}
-                      aria-label="Open Our Story tab"
-                      className="pointer-events-auto absolute left-1/2 -translate-x-1/2 -top-4 w-10 h-10 rounded-full border border-[#E2A43B]/70 bg-[#2C1D13]/90 text-[#F2B449] inline-flex items-center justify-center hover:scale-105 transition-transform shadow-sm cursor-pointer"
+                    <a
+                      href="#our-story"
+                      aria-label="Scroll to Our Story"
+                      className="pointer-events-auto absolute left-1/2 -translate-x-1/2 -top-4 w-10 h-10 rounded-full border border-[#E2A43B]/70 bg-[#2C1D13]/90 text-[#F2B449] inline-flex items-center justify-center hover:scale-105 transition-transform shadow-sm"
                     >
                       <ArrowDown className="w-4 h-4" />
-                    </button>
+                    </a>
                   </div>
                 </div>
               ) : (
@@ -667,7 +725,7 @@ export default function App() {
                         {hasMenuTab && (
                           <button
                             type="button"
-                            onClick={() => handleSelectTab('menu')}
+                            onClick={() => handleOpenMenuTab(false)}
                             className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-semibold text-white rounded-full transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                             style={{ backgroundColor: 'var(--accent)' }}
                           >
@@ -675,20 +733,17 @@ export default function App() {
                             <span>Explore Traditional Menu</span>
                           </button>
                         )}
-                        {hasReservationsTab && (
-                          <button
-                            type="button"
-                            onClick={() => handleSelectTab('reservations')}
-                            className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-medium border rounded-full whitespace-nowrap shrink-0 cursor-pointer"
-                            style={{
-                              borderColor: 'var(--border-color)',
-                              color: 'var(--text-primary)',
-                            }}
-                          >
-                            <MapPin className="w-4 h-4" />
-                            <span>Visit Us &amp; Reserve</span>
-                          </button>
-                        )}
+                        <a
+                          href="#visit-us"
+                          className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] text-sm font-medium border rounded-full whitespace-nowrap shrink-0"
+                          style={{
+                            borderColor: 'var(--border-color)',
+                            color: 'var(--text-primary)',
+                          }}
+                        >
+                          <MapPin className="w-4 h-4" />
+                          <span>Visit Us</span>
+                        </a>
                       </div>
                     </div>
 
@@ -710,8 +765,15 @@ export default function App() {
               )}
             </section>
 
-            {/* Read-Only Café Info Strip on Home Tab */}
-            <div className="max-w-[1240px] mx-auto px-5 sm:px-8 pt-6 pb-14">
+            {/* 02. Our Story + Quick Menu Directory + Village Hospitality Strip */}
+            <StoryMenuBand
+              cafeName={config.cafeName}
+              customImages={customImages}
+              onQuickJumpCategory={handleQuickJumpCategory}
+            />
+
+            {/* Read-Only Café Info Strip for Visitors */}
+            <div className="max-w-[1240px] mx-auto px-5 sm:px-8 pb-12">
               <div
                 className="border rounded-xl overflow-hidden"
                 style={{
@@ -764,71 +826,9 @@ export default function App() {
                 </dl>
               </div>
             </div>
-          </>
-        )}
 
-        {/* TAB 02: Our Story & Sri Lankan Experience */}
-        {resolvedActiveTab === 'our-story' && (
-          <>
-            <StoryMenuBand
-              cafeName={config.cafeName}
-              customImages={customImages}
-              onQuickJumpCategory={handleQuickJumpCategory}
-            />
-            {visibleSections.includes('experience') && (
-              <SriLankanExperienceSection bridgeImageSrc={customImages.bridge} />
-            )}
-          </>
-        )}
-
-        {/* TAB 03: Traditional Menu */}
-        {resolvedActiveTab === 'menu' && hasMenuTab && (
-          <MenuSection
-            items={config.customMenuItems}
-            customImages={customImages}
-            viewMode={activeMenuViewMode}
-            showSinhalaSubtitles={config.showSinhalaSubtitles}
-            externalCategorySelection={externalCategorySelection}
-            onChangeViewMode={(mode) => setVisitorMenuViewOverride(mode)}
-            trayQuantities={trayQuantities}
-            onAddItem={handleAddItem}
-            onDecrementItem={handleDecrementItem}
-          />
-        )}
-
-        {/* TAB 04: Gallery */}
-        {resolvedActiveTab === 'gallery' && hasGalleryTab && (
-          <CustomPhotoSections
-            sections={config.customPhotoSections}
-            customImages={customImages}
-            canEdit={isOwnerAdmin}
-            onEditSections={
-              isOwnerAdmin ? () => openAdminAccess('photos') : undefined
-            }
-          />
-        )}
-
-        {/* TAB 05: Reservations & Visit Us */}
-        {resolvedActiveTab === 'reservations' && hasReservationsTab && (
-          <>
-            {visibleSections.includes('visit-us') && (
-              <VisitUsSection
-                cafeName={config.cafeName}
-                locationLabel={config.locationLabel}
-                openingHours={config.openingHours}
-                phoneDisplay={config.phoneDisplay}
-                whatsappNumber={config.whatsappNumber}
-              />
-            )}
-            {visibleSections.includes('contact') && (
-              <ContactSection
-                cafeName={config.cafeName}
-                locationLabel={config.locationLabel}
-                phoneDisplay={config.phoneDisplay}
-                whatsappNumber={config.whatsappNumber}
-                email={config.email}
-              />
-            )}
+            {/* Gallery · Sri Lankan Experience · Visit Us · Contact */}
+            {visibleSections.map((sectionId) => renderMainSection(sectionId))}
           </>
         )}
       </main>
@@ -855,46 +855,85 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5 text-xs font-medium text-[#EFE6D5]">
-            <button
-              type="button"
-              onClick={() => handleSelectTab('home')}
-              className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+            <a
+              href="#home"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNavigateMain('#home');
+              }}
+              className="hover:text-[#F2B449] whitespace-nowrap"
             >
               Home
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectTab('our-story')}
-              className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+            </a>
+            <a
+              href="#our-story"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNavigateMain('#our-story');
+              }}
+              className="hover:text-[#F2B449] whitespace-nowrap"
             >
               Our Story
-            </button>
+            </a>
             {hasMenuTab && (
-              <button
-                type="button"
-                onClick={() => handleSelectTab('menu')}
-                className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+              <a
+                href="#traditional-menu"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleOpenMenuTab(false);
+                }}
+                className="hover:text-[#F2B449] whitespace-nowrap"
               >
                 Traditional Menu
-              </button>
+              </a>
             )}
-            {hasGalleryTab && (
-              <button
-                type="button"
-                onClick={() => handleSelectTab('gallery')}
-                className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+            {visibleSections.includes('gallery') && (
+              <a
+                href="#gallery"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigateMain('#gallery');
+                }}
+                className="hover:text-[#F2B449] whitespace-nowrap"
               >
                 Gallery
-              </button>
+              </a>
             )}
-            {hasReservationsTab && (
-              <button
-                type="button"
-                onClick={() => handleSelectTab('reservations')}
-                className="hover:text-[#F2B449] whitespace-nowrap cursor-pointer"
+            {visibleSections.includes('experience') && (
+              <a
+                href="#sri-lankan-experience"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigateMain('#sri-lankan-experience');
+                }}
+                className="hover:text-[#F2B449] whitespace-nowrap"
+              >
+                Sri Lankan Experience
+              </a>
+            )}
+            {visibleSections.includes('visit-us') && (
+              <a
+                href="#visit-us"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigateMain('#visit-us');
+                }}
+                className="hover:text-[#F2B449] whitespace-nowrap"
+              >
+                Visit Us
+              </a>
+            )}
+            {visibleSections.includes('contact') && (
+              <a
+                href="#contact"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigateMain('#contact');
+                }}
+                className="hover:text-[#F2B449] whitespace-nowrap"
               >
                 Reservations
-              </button>
+              </a>
             )}
             <a
               href={`https://wa.me/${config.whatsappNumber}`}
