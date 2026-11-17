@@ -2,8 +2,12 @@ import { User } from 'firebase/auth';
 
 const OTP_SESSION_STORAGE_KEY = 'pahanpiyasa_admin_otp_session_v1';
 
+const DEFAULT_OTP_API_URL =
+  'https://script.google.com/macros/s/AKfycbyonhJd6lfEH_dL60ylBkFQXt9lBLSC_q1ssYTzGDzFko_OpfrXyCM0L3sePcHVFCaNsw/exec';
+
 const RAW_OTP_API_BASE = (
-  (import.meta.env.VITE_OTP_API_URL as string | undefined) || ''
+  (import.meta.env.VITE_OTP_API_URL as string | undefined) ||
+  DEFAULT_OTP_API_URL
 )
   .trim()
   .replace(/\/$/, '');
